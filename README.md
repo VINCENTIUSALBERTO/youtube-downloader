@@ -1,44 +1,34 @@
-# YouTube Downloader Telegram Bot
+# YouTube Downloader Telegram Bot - Commercial Edition
 
-A Telegram bot for downloading media from YouTube and other platforms, then automatically uploading to Google Drive.
+Bot Telegram untuk mendownload media dari YouTube dengan sistem token berbayar. Mendukung pengiriman via Telegram atau Google Drive.
 
-## Features
+## ✨ Fitur
 
-- 🔐 **User Authentication**: Whitelist-based security - only authorized users can use the bot
-- 🎵 **Audio Download**: Extract audio as MP3 (192kbps)
-- 📹 **Video Quality Options**: 360p, 720p, 1080p, or Best Quality (2K/4K)
-- ☁️ **Google Drive Integration**: Automatic upload via rclone
-- 🧹 **Auto Cleanup**: Files are deleted from VPS after successful upload
-- 📢 **Real-time Notifications**: Status updates for downloading, uploading, and completion
-- 🍪 **Cookie Support**: Optional cookies.txt for age-restricted content
+- 🎫 **Sistem Token**: 1 token = 1 download (dapat dijual)
+- 🔧 **Admin Panel**: Kelola user dan token
+- 🎵 **YouTube Music**: Download audio MP3
+- 📹 **YouTube Video**: Download video single (1080p)
+- 📋 **YouTube Playlist**: Download semua video playlist (720p)
+- ✅ **Konfirmasi Judul**: Cek judul sebelum download
+- 📱 **Kirim via Telegram**: File langsung dikirim ke chat
+- ☁️ **Upload ke Drive**: File diupload, link diberikan
+- 🍪 **Cookie Support**: Untuk konten age-restricted
 
-## Supported Platforms
+## 🛠 Persyaratan
 
-- YouTube
-- Twitter/X
-- TikTok
-- Instagram
-- Vimeo
-- Reddit
-- Twitch
-- And many more (any platform supported by yt-dlp)
-
-## Prerequisites
-
-### System Requirements
-
-- Ubuntu/Debian VPS (or any Linux distribution)
-- Python 3.9 or higher
+### Sistem
+- Ubuntu/Debian VPS
+- Python 3.9+
 - FFmpeg
 - rclone
 
-### Install System Dependencies
+### Instalasi Dependencies
 
 ```bash
-# Update package list
+# Update sistem
 sudo apt update
 
-# Install Python and pip
+# Install Python
 sudo apt install python3 python3-pip python3-venv -y
 
 # Install FFmpeg
@@ -48,63 +38,49 @@ sudo apt install ffmpeg -y
 curl https://rclone.org/install.sh | sudo bash
 ```
 
-## Setup Guide
+## 📋 Panduan Setup
 
-### 1. Get Your Telegram Bot Token
+### 1. Dapatkan Bot Token
 
-1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
-2. Send `/newbot` command
-3. Follow the prompts to name your bot
-4. Copy the bot token (looks like: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`)
+1. Buka Telegram, cari [@BotFather](https://t.me/BotFather)
+2. Kirim `/newbot`
+3. Ikuti instruksi untuk membuat bot
+4. Copy token (contoh: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`)
 
-### 2. Get Your Telegram User ID
+### 2. Dapatkan User ID Anda (untuk Admin)
 
-1. Open Telegram and search for [@userinfobot](https://t.me/userinfobot)
-2. Start the bot and it will show your User ID
-3. Copy your numeric User ID (e.g., `123456789`)
+1. Buka Telegram, cari [@userinfobot](https://t.me/userinfobot)
+2. Start bot, akan ditampilkan User ID Anda
+3. Copy User ID (contoh: `123456789`)
 
-### 3. Configure rclone for Google Drive
+### 3. Konfigurasi rclone untuk Google Drive
 
 ```bash
-# Start rclone configuration
 rclone config
 
-# Follow these steps:
-# 1. Type 'n' for new remote
-# 2. Name it 'gdrive' (or any name you prefer)
-# 3. Choose 'Google Drive' from the list (usually number 15 or 18)
-# 4. Leave client_id and client_secret blank (press Enter)
-# 5. Choose full access scope (usually option 1)
-# 6. Leave root_folder_id blank
-# 7. Leave service_account_file blank
-# 8. Choose 'n' for advanced config
-# 9. Choose 'y' for auto config if on a machine with browser
-#    Or use remote auth if on headless server
-# 10. Choose 'n' for team drive (unless you need it)
-# 11. Confirm with 'y'
+# Ikuti langkah berikut:
+# 1. Ketik 'n' untuk remote baru
+# 2. Beri nama 'gdrive'
+# 3. Pilih 'Google Drive'
+# 4. Kosongkan client_id dan client_secret (tekan Enter)
+# 5. Pilih full access scope
+# 6. Ikuti proses autentikasi
+# 7. Konfirmasi dengan 'y'
 ```
 
-For headless servers (VPS without GUI):
-```bash
-# On your local machine with a browser
-rclone authorize "drive"
-
-# Copy the resulting token and paste it on your VPS when prompted
-```
-
-Test your rclone configuration:
+Test konfigurasi:
 ```bash
 rclone lsd gdrive:
 ```
 
-### 4. Install the Bot
+### 4. Install Bot
 
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/VINCENTIUSALBERTO/youtube-downloader.git
 cd youtube-downloader
 
-# Create virtual environment
+# Buat virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
@@ -112,40 +88,34 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 5. Configure Environment Variables
-
-Create a `.env` file or export environment variables:
+### 5. Konfigurasi Environment Variables
 
 ```bash
-# Required
+# Wajib
 export BOT_TOKEN="your_telegram_bot_token"
-export ALLOWED_USER_IDS="123456789,987654321"  # Comma-separated user IDs
+export ADMIN_USER_IDS="123456789"  # User ID admin (comma-separated)
 
-# Optional
-export RCLONE_REMOTE="gdrive:YouTube_Downloads"  # Default: gdrive:YouTube_Downloads
-export DOWNLOAD_DIR="/tmp/youtube_downloads"      # Default: /tmp/youtube_downloads
-export COOKIES_FILE="/path/to/cookies.txt"        # For age-restricted content
+# Opsional
+export RCLONE_REMOTE="gdrive:YouTube_Downloads"
+export DOWNLOAD_DIR="/tmp/youtube_downloads"
+export COOKIES_FILE="/path/to/cookies.txt"
+export DATA_FILE="bot_data.json"
+export ADMIN_CONTACT="@your_username"
+export TOKEN_PRICE="Rp 5.000 / token"
 ```
 
-### 6. Run the Bot
+### 6. Jalankan Bot
 
 ```bash
-# Activate virtual environment
 source venv/bin/activate
-
-# Run the bot
 python main.py
 ```
 
-## Running as a System Service
-
-Create a systemd service for automatic startup:
+## 🖥 Menjalankan sebagai Service
 
 ```bash
 sudo nano /etc/systemd/system/youtube-bot.service
 ```
-
-Add the following content:
 
 ```ini
 [Unit]
@@ -156,9 +126,10 @@ After=network.target
 Type=simple
 User=your_username
 WorkingDirectory=/path/to/youtube-downloader
-Environment="BOT_TOKEN=your_token_here"
-Environment="ALLOWED_USER_IDS=123456789"
-Environment="RCLONE_REMOTE=gdrive:YouTube_Downloads"
+Environment="BOT_TOKEN=your_token"
+Environment="ADMIN_USER_IDS=123456789"
+Environment="ADMIN_CONTACT=@your_username"
+Environment="TOKEN_PRICE=Rp 5.000 / token"
 ExecStart=/path/to/youtube-downloader/venv/bin/python main.py
 Restart=always
 RestartSec=10
@@ -167,65 +138,78 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-Enable and start the service:
-
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable youtube-bot
 sudo systemctl start youtube-bot
-
-# Check status
-sudo systemctl status youtube-bot
-
-# View logs
-journalctl -u youtube-bot -f
 ```
 
-## Usage
+## 📱 Cara Penggunaan
 
-1. Start a chat with your bot on Telegram
-2. Send a video URL (YouTube, Twitter, TikTok, etc.)
-3. Select your preferred format from the inline keyboard
-4. Wait for the bot to download and upload to Google Drive
-5. Done! ✅
+### Untuk User
 
-## Configuration Options
+1. Start chat dengan bot
+2. Kirim link YouTube
+3. Pilih tipe download (Music/Video/Playlist)
+4. Konfirmasi judul
+5. Pilih pengiriman (Telegram/Drive)
+6. Selesai! (1 download = 1 token)
 
-| Environment Variable | Description | Default |
-|---------------------|-------------|---------|
-| `BOT_TOKEN` | Telegram bot token from BotFather | Required |
-| `ALLOWED_USER_IDS` | Comma-separated list of authorized user IDs | Required |
-| `RCLONE_REMOTE` | rclone remote destination | `gdrive:YouTube_Downloads` |
-| `DOWNLOAD_DIR` | Temporary download directory | `/tmp/youtube_downloads` |
-| `COOKIES_FILE` | Path to cookies.txt for age-restricted content | None |
+### Commands User
+- `/start` - Mulai bot
+- `/tokens` - Cek sisa token
+- `/buy` - Info beli token
+- `/help` - Bantuan
 
-## Cookies Setup (Optional)
+### Commands Admin
+- `/admin` - Panel admin
+- `/addtoken <user_id> <amount>` - Tambah token user
+- `/checkuser <user_id>` - Cek info user
+- `/users` - Lihat semua user
 
-For age-restricted or login-required content:
+## ⚙️ Konfigurasi
 
-1. Install a browser extension to export cookies (e.g., "Get cookies.txt")
-2. Log in to YouTube in your browser
-3. Export cookies to `cookies.txt`
-4. Place the file on your VPS
-5. Set `COOKIES_FILE` environment variable to the file path
+| Variable | Deskripsi | Default |
+|----------|-----------|---------|
+| `BOT_TOKEN` | Token bot Telegram | Wajib |
+| `ADMIN_USER_IDS` | ID admin (comma-separated) | Wajib |
+| `RCLONE_REMOTE` | Remote rclone | `gdrive:YouTube_Downloads` |
+| `DOWNLOAD_DIR` | Folder download temp | `/tmp/youtube_downloads` |
+| `COOKIES_FILE` | File cookies.txt | None |
+| `DATA_FILE` | File database JSON | `bot_data.json` |
+| `ADMIN_CONTACT` | Kontak admin | `@admin` |
+| `TOKEN_PRICE` | Harga token | `Rp 5.000 / token` |
 
-## Troubleshooting
+## 💰 Model Bisnis
 
-### Bot doesn't respond
-- Verify `BOT_TOKEN` is correct
-- Check if your User ID is in `ALLOWED_USER_IDS`
-- Check logs: `journalctl -u youtube-bot -f`
+- Setiap download membutuhkan 1 token
+- Playlist dihitung per video
+- Admin menentukan harga token
+- Token ditambahkan manual oleh admin setelah pembayaran
+- Admin mendapat akses gratis (unlimited)
 
-### Download fails
-- Make sure `yt-dlp` is up to date: `pip install -U yt-dlp`
-- Check if the video is available in your region
-- For age-restricted content, configure cookies.txt
+## 🔧 Troubleshooting
 
-### Upload fails
-- Verify rclone configuration: `rclone lsd gdrive:`
-- Check if you have enough Google Drive storage
-- Ensure the remote name matches `RCLONE_REMOTE`
+### Bot tidak merespon
+- Cek `BOT_TOKEN` sudah benar
+- Cek logs: `journalctl -u youtube-bot -f`
 
-## License
+### Download gagal
+- Update yt-dlp: `pip install -U yt-dlp`
+- Cek video tersedia di region Anda
+- Untuk age-restricted: konfigurasi cookies.txt
+
+### Upload gagal
+- Cek konfigurasi rclone: `rclone lsd gdrive:`
+- Cek storage Google Drive
+
+## 📝 Data Storage
+
+Bot menyimpan data di file JSON (`bot_data.json`):
+- Saldo token user
+- Username user
+- History download
+
+## 📄 License
 
 MIT License
