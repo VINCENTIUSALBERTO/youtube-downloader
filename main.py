@@ -16,6 +16,7 @@ import os
 import re
 import uuid
 from pathlib import Path
+from dotenv import load_dotenv
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -34,16 +35,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+load_dotenv()
+
 # Configuration from environment variables
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_USER_IDS = [
     int(uid.strip())
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
-    if uid.strip()
+    if uid.strip().isdigit()
 ]
 RCLONE_REMOTE = os.getenv("RCLONE_REMOTE", "gdrive:YouTube_Downloads")
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/youtube_downloads")
-COOKIES_FILE = os.getenv("COOKIES_FILE", "")  # Optional cookies.txt path
+COOKIES_FILE = os.getenv("COOKIES_FILE", "/root/youtube-downloader/cookies.txt")  # Optional cookies.txt path
 
 # Format options for yt-dlp
 FORMAT_OPTIONS = {
@@ -245,13 +248,14 @@ async def download_and_upload(
         output_template,
         "--restrict-filenames",
         "--no-playlist",
-        "--merge-output-format",
-        "mp4" if format_key != "mp3" else "mp3",
     ]
 
     # Add cookies file if configured
     if COOKIES_FILE and os.path.exists(COOKIES_FILE):
+        print(f"DEBUG: Cookies ditemukan di {COOKIES_FILE}, sedang dimuat...") # Tambah ini
         cmd.extend(["--cookies", COOKIES_FILE])
+    else:
+        print(f"DEBUG: Cookies TIDAK ditemukan di path: {COOKIES_FILE}") # Tambah ini
 
     # Add audio extraction for MP3
     if format_key == "mp3":
