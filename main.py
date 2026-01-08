@@ -54,6 +54,9 @@ DATA_FILE = os.getenv("DATA_FILE", "bot_data.json")
 ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "@admin")
 TOKEN_PRICE = os.getenv("TOKEN_PRICE", "Rp 5.000 / token")
 
+# Telegram file size limit (50MB for bots)
+TELEGRAM_FILE_SIZE_LIMIT = 50 * 1024 * 1024
+
 # Download type options
 DOWNLOAD_TYPES = {
     "music": {
@@ -98,8 +101,8 @@ class DataManager:
             try:
                 with open(self.filepath, "r") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                logger.error(f"Failed to load data from {self.filepath}")
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Failed to load data from {self.filepath}: {e}")
         return {"users": {}, "downloads": []}
 
     def _save(self) -> None:
@@ -406,12 +409,13 @@ async def checkuser_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         target_user_id = int(context.args[0])
         tokens = data_manager.get_user_tokens(target_user_id)
         user_data = data_manager.data["users"].get(str(target_user_id), {})
-        username = user_data.get("username", "Unknown")
+        username = user_data.get("username", "")
+        username_display = f"@{username}" if username else "Tidak tersedia"
 
         await update.message.reply_text(
             f"👤 *Info User*\n\n"
             f"ID: `{target_user_id}`\n"
-            f"Username: @{username}\n"
+            f"Username: {username_display}\n"
             f"🎫 Token: {tokens}",
             parse_mode="Markdown",
         )
@@ -437,9 +441,10 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     text = "👥 *Daftar User*\n\n"
     for user_id, info in users.items():
-        username = info.get("username", "?")
+        username = info.get("username", "")
         tokens = info.get("tokens", 0)
-        text += f"• `{user_id}` (@{username}) - {tokens} token\n"
+        username_display = f"@{username}" if username else "N/A"
+        text += f"• `{user_id}` ({username_display}) - {tokens} token\n"
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -648,12 +653,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.edit_message_text("❌ Sesi expired. Kirim link lagi.")
             return
 
-        # Deduct tokens (admins are free)
+        # Check tokens upfront (but don't deduct yet - deduct after success)
         if not is_admin(user_id):
-            for _ in range(video_count):
-                if not data_manager.use_token(user_id):
-                    await query.edit_message_text("❌ Token tidak cukup!")
-                    return
+            tokens = data_manager.get_user_tokens(user_id)
+            if tokens < video_count:
+                await query.edit_message_text(
+                    f"❌ Token tidak cukup!\n\n"
+                    f"Dibutuhkan: {video_count} token\n"
+                    f"Token Anda: {tokens}",
+                    parse_mode="Markdown",
+                )
+                return
 
         if context.user_data:
             context.user_data["delivery_method"] = delivery_method
@@ -674,6 +684,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 chat_id=query.message.chat_id,
                 message_id=query.message.message_id,
                 user_id=user_id,
+                video_count=video_count,
                 context=context,
             ),
             name=f"download_{query.message.chat_id}_{query.message.message_id}",
@@ -693,6 +704,7 @@ async def process_download(
     chat_id: int,
     message_id: int,
     user_id: int,
+    video_count: int,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Process the download and delivery."""
@@ -754,6 +766,11 @@ async def process_download(
         if not downloaded_files:
             raise RuntimeError("Tidak ada file yang didownload")
 
+        # Deduct tokens after successful download (admins are free)
+        if not is_admin(user_id):
+            for _ in range(video_count):
+                data_manager.use_token(user_id)
+
         # Handle delivery
         if delivery_method == "telegram":
             await context.bot.edit_message_text(
@@ -765,8 +782,8 @@ async def process_download(
 
             for file_path in downloaded_files:
                 file_size = file_path.stat().st_size
-                # Telegram limit is 50MB for bots
-                if file_size > 50 * 1024 * 1024:
+                # Telegram file size limit
+                if file_size > TELEGRAM_FILE_SIZE_LIMIT:
                     # File too large, upload to drive instead
                     await context.bot.send_message(
                         chat_id=chat_id,
