@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -48,13 +49,6 @@ COOKIES_FILE = os.getenv("COOKIES_FILE", "")  # Optional cookies.txt path
 FORMAT_OPTIONS = {
     "mp3": {
         "format": "bestaudio/best",
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }
-        ],
         "label": "🎵 MP3 (Audio Only)",
     },
     "360p": {
@@ -236,11 +230,13 @@ async def download_and_upload(
     """
     format_opts = FORMAT_OPTIONS.get(format_key, FORMAT_OPTIONS["720p"])
 
-    # Create download directory
-    Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    # Create a unique download directory to avoid race conditions
+    unique_id = str(uuid.uuid4())[:8]
+    download_dir = os.path.join(DOWNLOAD_DIR, unique_id)
+    Path(download_dir).mkdir(parents=True, exist_ok=True)
 
     # Build yt-dlp command
-    output_template = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+    output_template = os.path.join(download_dir, "%(title)s.%(ext)s")
     cmd = [
         "yt-dlp",
         "--format",
@@ -282,48 +278,27 @@ async def download_and_upload(
             parse_mode="Markdown",
         )
 
-        # Get video info first to determine filename
-        info_cmd = ["yt-dlp", "--print", "filename", "--output", output_template]
-        if COOKIES_FILE and os.path.exists(COOKIES_FILE):
-            info_cmd.extend(["--cookies", COOKIES_FILE])
-        if format_key == "mp3":
-            info_cmd.extend(["--extract-audio", "--audio-format", "mp3"])
-        info_cmd.append(url)
-
-        # Run info command
-        info_result = await asyncio.create_subprocess_exec(
-            *info_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await info_result.communicate()
-        expected_filename = stdout.decode().strip().split("\n")[-1]
-        if format_key == "mp3" and not expected_filename.endswith(".mp3"):
-            expected_filename = (
-                os.path.splitext(expected_filename)[0] + ".mp3"
-            )
-
         # Run download command
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        _, stderr = await process.communicate()
 
         if process.returncode != 0:
             error_msg = stderr.decode()[:500] if stderr else "Unknown error"
             raise RuntimeError(f"Download failed: {error_msg}")
 
-        # Find downloaded file
-        download_path = Path(DOWNLOAD_DIR)
-        files = list(download_path.glob("*"))
+        # Find downloaded file in the unique directory
+        download_path = Path(download_dir)
+        files = [f for f in download_path.iterdir() if f.is_file()]
 
         if not files:
             raise RuntimeError("No file was downloaded")
 
-        # Get the most recently modified file
-        downloaded_file = max(files, key=lambda f: f.stat().st_mtime)
+        # With unique directory, there should be only one file
+        downloaded_file = files[0]
         logger.info(f"Downloaded file: {downloaded_file}")
 
         # Update status: Uploading
@@ -354,17 +329,26 @@ async def download_and_upload(
             error_msg = rclone_stderr.decode()[:500] if rclone_stderr else "Unknown error"
             raise RuntimeError(f"Upload failed: {error_msg}")
 
-        # Cleanup: Delete local file after successful upload
+        # Store filename before cleanup
+        filename = downloaded_file.name
+
+        # Cleanup: Delete local file and unique directory after successful upload
         if downloaded_file and downloaded_file.exists():
             downloaded_file.unlink()
             logger.info(f"Deleted local file: {downloaded_file}")
+        # Remove the unique directory
+        if download_path.exists():
+            try:
+                download_path.rmdir()
+            except OSError:
+                pass  # Directory not empty, leave it
 
         # Update status: Done
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=f"✅ *Done!*\n\n"
-            f"📁 *File:* `{sanitize_filename(downloaded_file.name)}`\n"
+            f"📁 *File:* `{sanitize_filename(filename)}`\n"
             f"📂 *Location:* `{RCLONE_REMOTE}`\n\n"
             f"Your file has been uploaded to Google Drive!",
             parse_mode="Markdown",
@@ -398,6 +382,13 @@ async def download_and_upload(
         # Cleanup on error
         if downloaded_file and downloaded_file.exists():
             downloaded_file.unlink()
+        # Try to remove the unique directory
+        download_path = Path(download_dir)
+        if download_path.exists():
+            try:
+                download_path.rmdir()
+            except OSError:
+                pass
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -438,15 +429,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parse_mode="Markdown",
     )
 
-    # Process download in background
-    asyncio.create_task(
+    # Process download in background with proper exception handling
+    task = asyncio.create_task(
         download_and_upload(
             url=url,
             format_key=format_key,
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
             context=context,
-        )
+        ),
+        name=f"download_{query.message.chat_id}_{query.message.message_id}",
+    )
+    # Add callback to log any unhandled exceptions
+    task.add_done_callback(
+        lambda t: logger.error(f"Task failed: {t.exception()}")
+        if t.exception()
+        else None
     )
 
 
