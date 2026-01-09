@@ -5,6 +5,7 @@ Provides inline keyboard builders for bot interactions.
 """
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from bot.config import config
 
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -17,7 +18,22 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("💰 Token Saya", callback_data="my_tokens"),
             InlineKeyboardButton("📊 Riwayat", callback_data="my_history"),
         ],
-        [InlineKeyboardButton("💎 Beli Token", callback_data="buy_tokens")],
+        [
+            InlineKeyboardButton("🎁 Bonus Harian", callback_data="claim_bonus"),
+            InlineKeyboardButton("💳 Topup", callback_data="topup_menu"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_registration_keyboard() -> InlineKeyboardMarkup:
+    """Get registration keyboard."""
+    keyboard = [
+        [InlineKeyboardButton(
+            f"📢 Join {config.required_channel}",
+            url=f"https://t.me/{config.required_channel.replace('@', '')}",
+        )],
+        [InlineKeyboardButton("✅ Verifikasi", callback_data="verify_registration")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -43,6 +59,19 @@ def get_format_keyboard(download_type: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📹 Semua Video 720p", callback_data="format_playlist_720p")],
             [InlineKeyboardButton("🔙 Kembali", callback_data="back_menu")],
         ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_auto_detect_format_keyboard() -> InlineKeyboardMarkup:
+    """Get format selection keyboard for auto-detected YouTube links."""
+    keyboard = [
+        [InlineKeyboardButton("🎵 Download MP3", callback_data="auto_format_mp3")],
+        [InlineKeyboardButton("📹 Video 360p", callback_data="auto_format_360p")],
+        [InlineKeyboardButton("📺 Video 720p (HD)", callback_data="auto_format_720p")],
+        [InlineKeyboardButton("🎬 Video 1080p", callback_data="auto_format_1080p")],
+        [InlineKeyboardButton("⭐ Best Quality", callback_data="auto_format_best")],
+        [InlineKeyboardButton("❌ Batal", callback_data="cancel_download")],
+    ]
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -75,6 +104,7 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📊 Statistik", callback_data="admin_stats")],
         [InlineKeyboardButton("🚫 Ban/Unban User", callback_data="admin_ban")],
         [InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("📋 Topup Pending", callback_data="admin_pending_topup")],
         [InlineKeyboardButton("🔙 Kembali", callback_data="back_menu")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -89,6 +119,38 @@ def get_token_packages_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💎 25 Token - Rp 75.000", callback_data="package_25")],
         [InlineKeyboardButton("📞 Hubungi Admin", callback_data="contact_admin")],
         [InlineKeyboardButton("🔙 Kembali", callback_data="back_menu")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_topup_keyboard() -> InlineKeyboardMarkup:
+    """Get topup menu keyboard."""
+    keyboard = [
+        [InlineKeyboardButton(f"1️⃣ 1 Token - Rp {config.token_price_1:,}".replace(",", "."), callback_data="topup_1")],
+        [InlineKeyboardButton(f"5️⃣ 5 Token - Rp {config.token_price_5:,}".replace(",", "."), callback_data="topup_5")],
+        [InlineKeyboardButton(f"🔟 10 Token - Rp {config.token_price_10:,}".replace(",", "."), callback_data="topup_10")],
+        [InlineKeyboardButton(f"💎 25 Token - Rp {config.token_price_25:,}".replace(",", "."), callback_data="topup_25")],
+        [InlineKeyboardButton("🔙 Kembali", callback_data="back_menu")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_topup_confirm_keyboard(package: str) -> InlineKeyboardMarkup:
+    """Get topup confirmation keyboard."""
+    keyboard = [
+        [InlineKeyboardButton("📤 Kirim Bukti Transfer", callback_data=f"send_proof_{package}")],
+        [InlineKeyboardButton("🔙 Kembali", callback_data="topup_menu")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_admin_topup_action_keyboard(request_id: int) -> InlineKeyboardMarkup:
+    """Get admin topup action keyboard."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Terima", callback_data=f"approve_topup_{request_id}"),
+            InlineKeyboardButton("❌ Tolak", callback_data=f"reject_topup_{request_id}"),
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 

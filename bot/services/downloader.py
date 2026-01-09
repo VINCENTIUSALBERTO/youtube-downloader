@@ -104,6 +104,8 @@ class DownloaderService:
             "--no-playlist",
             "--progress",
             "--newline",
+            "--no-check-certificate",
+            "--extractor-args", "youtube:player_client=web,default",
         ]
         
         # Add cookies if available
@@ -212,8 +214,14 @@ class DownloaderService:
             "yt-dlp",
             "--flat-playlist",
             "--print", "%(id)s",
+            "--no-check-certificate",
+            "--extractor-args", "youtube:player_client=web,default",
             url,
         ]
+        
+        if self.cookies_file and os.path.exists(self.cookies_file):
+            cmd.insert(1, "--cookies")
+            cmd.insert(2, self.cookies_file)
         
         try:
             process = await asyncio.create_subprocess_exec(

@@ -42,6 +42,8 @@ class Database:
                 last_name TEXT,
                 tokens INTEGER DEFAULT 0,
                 is_banned INTEGER DEFAULT 0,
+                is_registered INTEGER DEFAULT 0,
+                last_daily_bonus DATE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -79,6 +81,37 @@ class Database:
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+        
+        # Topup requests table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS topup_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                package TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',
+                message_id INTEGER,
+                admin_message_id INTEGER,
+                admin_chat_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processed_at TIMESTAMP,
+                processed_by INTEGER,
+                notes TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
+        
+        # Add columns if they don't exist (for existing databases)
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN is_registered INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN last_daily_bonus DATE")
+        except sqlite3.OperationalError:
+            pass
         
         conn.commit()
         conn.close()
@@ -325,6 +358,172 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM token_transactions 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        """, (user_id, limit))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    
+    # Registration operations
+    def is_user_registered(self, user_id: int) -> bool:
+        """Check if user is registered."""
+        user = self.get_user(user_id)
+        return bool(user and user.get("is_registered"))
+    
+    def register_user(self, user_id: int) -> None:
+        """Mark user as registered."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users 
+            SET is_registered = 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+        """, (user_id,))
+        conn.commit()
+        conn.close()
+    
+    # Daily bonus operations
+    def get_last_daily_bonus(self, user_id: int) -> Optional[str]:
+        """Get last daily bonus date for user."""
+        user = self.get_user(user_id)
+        return user.get("last_daily_bonus") if user else None
+    
+    def claim_daily_bonus(
+        self,
+        user_id: int,
+        amount: int,
+        date_str: str,
+    ) -> int:
+        """
+        Claim daily bonus for user.
+        
+        Args:
+            user_id: User ID
+            amount: Bonus amount
+            date_str: Current date string (YYYY-MM-DD)
+            
+        Returns:
+            New token balance
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # Update token balance and last bonus date
+        cursor.execute("""
+            UPDATE users 
+            SET tokens = tokens + ?,
+                last_daily_bonus = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+        """, (amount, date_str, user_id))
+        
+        # Record transaction
+        cursor.execute("""
+            INSERT INTO token_transactions 
+            (user_id, amount, transaction_type, description)
+            VALUES (?, ?, 'credit', 'Daily bonus')
+        """, (user_id, amount))
+        
+        conn.commit()
+        conn.close()
+        return self.get_user_tokens(user_id)
+    
+    # Topup request operations
+    def create_topup_request(
+        self,
+        user_id: int,
+        amount: int,
+        package: str,
+        price: int,
+        message_id: Optional[int] = None,
+    ) -> int:
+        """Create a new topup request."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO topup_requests 
+            (user_id, amount, package, price, message_id, status)
+            VALUES (?, ?, ?, ?, ?, 'pending')
+        """, (user_id, amount, package, price, message_id))
+        request_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return request_id  # type: ignore
+    
+    def update_topup_request(
+        self,
+        request_id: int,
+        admin_message_id: Optional[int] = None,
+        admin_chat_id: Optional[int] = None,
+        status: Optional[str] = None,
+        processed_by: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> None:
+        """Update topup request."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        updates = []
+        values = []
+        
+        if admin_message_id:
+            updates.append("admin_message_id = ?")
+            values.append(admin_message_id)
+        if admin_chat_id:
+            updates.append("admin_chat_id = ?")
+            values.append(admin_chat_id)
+        if status:
+            updates.append("status = ?")
+            values.append(status)
+            if status in ("approved", "rejected"):
+                updates.append("processed_at = CURRENT_TIMESTAMP")
+        if processed_by:
+            updates.append("processed_by = ?")
+            values.append(processed_by)
+        if notes:
+            updates.append("notes = ?")
+            values.append(notes)
+        
+        if updates:
+            values.append(request_id)
+            cursor.execute(
+                f"UPDATE topup_requests SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+        conn.close()
+    
+    def get_topup_request(self, request_id: int) -> Optional[dict]:
+        """Get topup request by ID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM topup_requests WHERE id = ?", (request_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    
+    def get_pending_topup_requests(self) -> List[dict]:
+        """Get all pending topup requests."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM topup_requests 
+            WHERE status = 'pending' 
+            ORDER BY created_at ASC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    
+    def get_user_topup_requests(self, user_id: int, limit: int = 5) -> List[dict]:
+        """Get user's topup request history."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM topup_requests 
             WHERE user_id = ? 
             ORDER BY created_at DESC 
             LIMIT ?

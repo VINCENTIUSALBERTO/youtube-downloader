@@ -44,6 +44,17 @@ class Config:
     
     # Database path
     database_path: str
+    
+    # Required channel for registration
+    required_channel: str
+    
+    # Daily bonus amount
+    daily_bonus_amount: int
+    
+    # Payment information for topup
+    payment_bank: str
+    payment_account: str
+    payment_name: str
 
 
 def _safe_int(value: str, default: int) -> int:
@@ -80,6 +91,11 @@ def load_config() -> Config:
         token_price_10=_safe_int(os.getenv("TOKEN_PRICE_10", "35000"), 35000),
         token_price_25=_safe_int(os.getenv("TOKEN_PRICE_25", "75000"), 75000),
         database_path=os.getenv("DATABASE_PATH", "data/bot.db"),
+        required_channel=os.getenv("REQUIRED_CHANNEL", "@FendyVpnChannel"),
+        daily_bonus_amount=_safe_int(os.getenv("DAILY_BONUS_AMOUNT", "10"), 10),
+        payment_bank=os.getenv("PAYMENT_BANK", "BCA"),
+        payment_account=os.getenv("PAYMENT_ACCOUNT", "1234567890"),
+        payment_name=os.getenv("PAYMENT_NAME", "Admin"),
     )
 
 
