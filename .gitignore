@@ -10,6 +10,13 @@ env/
 
 # Downloaded files
 /downloads/
+/tmp/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
 
 # Cookies file (contains sensitive data)
 cookies.txt
@@ -23,3 +30,11 @@ cookies.txt
 # OS files
 .DS_Store
 Thumbs.db
+
+# Log files
+*.log
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
