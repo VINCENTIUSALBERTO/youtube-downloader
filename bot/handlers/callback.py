@@ -1,0 +1,621 @@
+"""
+Callback query handler for YouTube Downloader Bot.
+
+Handles all inline keyboard button callbacks.
+"""
+
+import asyncio
+import logging
+from datetime import datetime
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from bot.database import Database
+from bot.services.downloader import DownloaderService, FORMAT_OPTIONS
+from bot.services.uploader import UploaderService
+from bot.services.token_manager import TokenManager
+from bot.utils.keyboards import (
+    get_main_menu_keyboard,
+    get_format_keyboard,
+    get_delivery_keyboard,
+    get_admin_keyboard,
+    get_token_packages_keyboard,
+    get_back_keyboard,
+    get_cancel_keyboard,
+)
+from bot.utils.helpers import format_download_result, format_file_size
+from bot.config import config
+
+logger = logging.getLogger(__name__)
+
+
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle all callback queries from inline keyboards."""
+    query = update.callback_query
+    if not query or not query.message or not update.effective_user:
+        return
+    
+    await query.answer()
+    
+    user = update.effective_user
+    data = query.data
+    
+    # Initialize database
+    db = Database(config.database_path)
+    
+    # Check if user is banned
+    if db.is_user_banned(user.id):
+        await query.edit_message_text(
+            "❌ Akun Anda telah diblokir. Hubungi admin untuk informasi lebih lanjut."
+        )
+        return
+    
+    # Handle different callbacks
+    if data == "back_menu":
+        await handle_back_to_menu(query, context, db)
+    
+    elif data == "back_format":
+        await handle_back_to_format(query, context)
+    
+    elif data.startswith("menu_"):
+        await handle_menu_selection(query, context, data)
+    
+    elif data.startswith("format_"):
+        await handle_format_selection(query, context, data)
+    
+    elif data.startswith("deliver_"):
+        await handle_delivery_selection(query, context, data, db)
+    
+    elif data == "my_tokens":
+        await handle_my_tokens(query, db, user.id)
+    
+    elif data == "my_history":
+        await handle_my_history(query, db, user.id)
+    
+    elif data == "buy_tokens":
+        await handle_buy_tokens(query, db)
+    
+    elif data == "contact_admin":
+        await handle_contact_admin(query)
+    
+    elif data.startswith("package_"):
+        await handle_package_selection(query, data)
+    
+    elif data == "cancel_download":
+        await handle_cancel_download(query, context)
+    
+    # Admin callbacks
+    elif data.startswith("admin_"):
+        await handle_admin_callback(query, context, data, db, user.id)
+
+
+async def handle_back_to_menu(query, context: ContextTypes.DEFAULT_TYPE, db: Database) -> None:
+    """Handle going back to main menu."""
+    # Clear user state
+    if context.user_data:
+        context.user_data.clear()
+    
+    user = query.from_user
+    token_manager = TokenManager(db)
+    balance = token_manager.get_balance(user.id)
+    is_admin = token_manager.is_admin(user.id)
+    
+    admin_badge = " 👑" if is_admin else ""
+    
+    await query.edit_message_text(
+        f"👋 *Menu Utama*{admin_badge}\n\n"
+        f"💰 Saldo Token: `{balance}`\n\n"
+        f"Pilih jenis download:",
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_back_to_format(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle going back to format selection."""
+    user_data = context.user_data or {}
+    mode = user_data.get("mode", "video")
+    
+    await query.edit_message_text(
+        "🎯 Pilih kualitas download:",
+        reply_markup=get_format_keyboard(mode),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_menu_selection(query, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+    """Handle main menu selection."""
+    mode = data.replace("menu_", "")
+    
+    if context.user_data is None:
+        context.user_data = {}
+    
+    context.user_data["mode"] = mode
+    
+    mode_labels = {
+        "music": "🎵 YouTube Musik",
+        "video": "🎬 YouTube Video",
+        "playlist": "📋 YouTube Playlist",
+    }
+    
+    await query.edit_message_text(
+        f"*{mode_labels.get(mode, 'Download')}*\n\n"
+        f"📝 Kirim link YouTube untuk melanjutkan.\n\n"
+        f"*Contoh link:*\n"
+        f"• `https://youtube.com/watch?v=xxxxx`\n"
+        f"• `https://youtu.be/xxxxx`\n"
+        + ("• `https://youtube.com/playlist?list=xxxxx`\n" if mode == "playlist" else "") +
+        f"\nKetuk tombol di bawah untuk kembali.",
+        reply_markup=get_back_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_format_selection(query, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+    """Handle format selection."""
+    format_key = data.replace("format_", "").replace("playlist_", "")
+    
+    if context.user_data is None:
+        context.user_data = {}
+    
+    context.user_data["format"] = format_key
+    
+    # Get format label
+    format_info = FORMAT_OPTIONS.get(format_key, {})
+    format_label = format_info.get("label", format_key.upper())
+    
+    await query.edit_message_text(
+        f"✅ *Kualitas Dipilih:* {format_label}\n\n"
+        f"📤 *Pilih metode pengiriman:*\n\n"
+        f"• *Telegram* - File dikirim langsung ke chat\n"
+        f"  ⚠️ Maksimal 50MB\n\n"
+        f"• *Google Drive* - Unlimited ukuran\n"
+        f"  📎 Anda akan mendapat link download",
+        reply_markup=get_delivery_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_delivery_selection(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    data: str,
+    db: Database,
+) -> None:
+    """Handle delivery method selection and start download."""
+    delivery_method = data.replace("deliver_", "")
+    user = query.from_user
+    
+    user_data = context.user_data or {}
+    url = user_data.get("pending_url")
+    format_key = user_data.get("format", "720p")
+    mode = user_data.get("mode", "video")
+    url_type = user_data.get("url_type", "video")
+    required_tokens = user_data.get("required_tokens", 1)
+    pending_info = user_data.get("pending_info")
+    
+    if not url:
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*\n\n"
+            "Silakan kirim ulang link YouTube.",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    # Check and deduct tokens
+    token_manager = TokenManager(db)
+    is_admin = token_manager.is_admin(user.id)
+    
+    if not is_admin:
+        balance = token_manager.get_balance(user.id)
+        if balance < required_tokens:
+            await query.edit_message_text(
+                f"❌ *Token Tidak Cukup!*\n\n"
+                f"💰 Saldo: `{balance}` token\n"
+                f"📦 Dibutuhkan: `{required_tokens}` token\n\n"
+                f"Hubungi {config.admin_contact} untuk beli token.",
+                parse_mode="Markdown",
+                reply_markup=get_back_keyboard(),
+            )
+            return
+        
+        # Deduct token
+        for _ in range(required_tokens):
+            token_manager.use_token(user.id, f"Download: {url[:50]}")
+        
+        new_balance = token_manager.get_balance(user.id)
+    else:
+        new_balance = token_manager.get_balance(user.id)
+    
+    # Create download record
+    title = ""
+    if pending_info:
+        if hasattr(pending_info, "title"):
+            title = pending_info.title
+        elif isinstance(pending_info, dict):
+            title = pending_info.get("title", "")
+    
+    download_id = db.create_download(
+        user_id=user.id,
+        url=url,
+        download_type=mode,
+        delivery_method=delivery_method,
+        title=title,
+    )
+    
+    # Clear pending data
+    context.user_data.pop("pending_url", None)
+    context.user_data.pop("pending_info", None)
+    
+    # Show processing message
+    await query.edit_message_text(
+        f"⏳ *Memproses Download...*\n\n"
+        f"📦 Kualitas: `{format_key.upper()}`\n"
+        f"📤 Pengiriman: `{delivery_method.title()}`\n"
+        f"💰 Token Sisa: `{new_balance}`\n\n"
+        f"Mohon tunggu, proses ini mungkin memakan waktu beberapa menit.",
+        parse_mode="Markdown",
+        reply_markup=get_cancel_keyboard(),
+    )
+    
+    # Start download process
+    asyncio.create_task(
+        process_download(
+            query=query,
+            context=context,
+            db=db,
+            download_id=download_id,
+            url=url,
+            format_key=format_key,
+            delivery_method=delivery_method,
+            user_id=user.id,
+        )
+    )
+
+
+async def process_download(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    download_id: int,
+    url: str,
+    format_key: str,
+    delivery_method: str,
+    user_id: int,
+) -> None:
+    """Process the actual download and upload."""
+    try:
+        # Initialize services
+        downloader = DownloaderService(
+            download_dir=config.download_dir,
+            cookies_file=config.cookies_file if config.cookies_file else None,
+        )
+        uploader = UploaderService(rclone_remote=config.rclone_remote)
+        
+        # Update status
+        async def update_status(message: str):
+            try:
+                await query.edit_message_text(
+                    f"⏳ *{message}*\n\n"
+                    f"Mohon tunggu...",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+        
+        # Download
+        await update_status("Mengunduh video...")
+        result = await downloader.download(url, format_key, update_status)
+        
+        if not result.success:
+            db.update_download(download_id, status="failed")
+            await query.edit_message_text(
+                f"❌ *Download Gagal*\n\n"
+                f"{result.error or 'Terjadi kesalahan'}",
+                parse_mode="Markdown",
+                reply_markup=get_back_keyboard(),
+            )
+            return
+        
+        # Update download record with title
+        db.update_download(
+            download_id,
+            title=result.title,
+            duration=result.duration,
+            file_size=result.file_size,
+        )
+        
+        # Upload
+        await update_status("Mengunggah file...")
+        
+        drive_link = None
+        is_audio = format_key == "mp3"
+        
+        if delivery_method == "telegram":
+            upload_result = await uploader.upload_to_telegram(
+                bot=context.bot,
+                chat_id=query.message.chat_id,
+                file_path=result.file_path,
+                caption=f"🎵 *{result.title}*" if is_audio else f"🎬 *{result.title}*",
+                is_audio=is_audio,
+            )
+            
+            if not upload_result.success:
+                # Fallback to Drive if Telegram fails
+                await update_status("Telegram gagal, menggunakan Drive...")
+                upload_result = await uploader.upload_to_drive(result.file_path)
+                delivery_method = "drive"
+                drive_link = upload_result.drive_link
+                
+        else:  # drive
+            upload_result = await uploader.upload_to_drive(result.file_path)
+            drive_link = upload_result.drive_link
+        
+        # Cleanup downloaded file
+        downloader.cleanup_file(result.file_path)
+        
+        if not upload_result.success:
+            db.update_download(download_id, status="failed")
+            await query.edit_message_text(
+                f"❌ *Upload Gagal*\n\n"
+                f"{upload_result.error or 'Terjadi kesalahan'}",
+                parse_mode="Markdown",
+                reply_markup=get_back_keyboard(),
+            )
+            return
+        
+        # Update download record
+        db.update_download(
+            download_id,
+            status="completed",
+            drive_link=drive_link,
+        )
+        
+        # Send success message
+        success_message = format_download_result(
+            title=result.title,
+            quality=format_key,
+            file_size=result.file_size,
+            duration=result.duration,
+            delivery_method=delivery_method,
+            drive_link=drive_link,
+        )
+        
+        await query.edit_message_text(
+            success_message,
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        
+        logger.info(f"Download completed for user {user_id}: {result.title}")
+        
+    except Exception as e:
+        logger.error(f"Download process error: {e}")
+        db.update_download(download_id, status="failed")
+        await query.edit_message_text(
+            f"❌ *Terjadi Kesalahan*\n\n"
+            f"{str(e)[:200]}",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+
+
+async def handle_my_tokens(query, db: Database, user_id: int) -> None:
+    """Handle token balance check."""
+    token_manager = TokenManager(db)
+    balance = token_manager.get_balance(user_id)
+    history = token_manager.get_transaction_history(user_id, 5)
+    
+    text = (
+        f"💰 *Saldo Token Anda*\n\n"
+        f"🪙 Token: `{balance}`\n\n"
+    )
+    
+    if history:
+        text += "📜 *Transaksi Terakhir:*\n"
+        for tx in history:
+            amount_str = f"+{tx['amount']}" if tx['amount'] > 0 else str(tx['amount'])
+            text += f"• {amount_str} - {tx['description'][:25]}\n"
+    
+    text += f"\n💎 Beli token? Ketuk tombol di bawah."
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=get_token_packages_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_my_history(query, db: Database, user_id: int) -> None:
+    """Handle download history."""
+    downloads = db.get_user_downloads(user_id, 10)
+    
+    if not downloads:
+        text = "📊 *Riwayat Download*\n\nBelum ada riwayat download."
+    else:
+        text = "📊 *Riwayat Download Anda*\n\n"
+        for i, dl in enumerate(downloads, 1):
+            status_emoji = "✅" if dl["status"] == "completed" else "❌"
+            title = (dl["title"] or "Unknown")[:25]
+            text += f"{i}. {status_emoji} {title}\n"
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=get_back_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_buy_tokens(query, db: Database) -> None:
+    """Handle buy tokens menu."""
+    token_manager = TokenManager(db)
+    text = token_manager.get_price_list_text()
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=get_token_packages_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_contact_admin(query) -> None:
+    """Handle contact admin request."""
+    text = (
+        f"📞 *Hubungi Admin*\n\n"
+        f"Untuk pembelian token atau bantuan:\n\n"
+        f"• Telegram: {config.admin_contact}\n"
+    )
+    
+    if config.admin_whatsapp:
+        text += f"• WhatsApp: {config.admin_whatsapp}\n"
+    
+    text += (
+        f"\n📝 *Informasi yang diperlukan:*\n"
+        f"• User ID Anda: `{query.from_user.id}`\n"
+        f"• Jumlah token yang ingin dibeli\n"
+        f"• Bukti transfer"
+    )
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=get_back_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_package_selection(query, data: str) -> None:
+    """Handle token package selection."""
+    package = data.replace("package_", "")
+    
+    prices = {
+        "1": config.token_price_1,
+        "5": config.token_price_5,
+        "10": config.token_price_10,
+        "25": config.token_price_25,
+    }
+    
+    price = prices.get(package, 0)
+    
+    text = (
+        f"💎 *Pembelian Token*\n\n"
+        f"📦 Paket: `{package}` Token\n"
+        f"💰 Harga: `Rp {price:,}`\n\n".replace(",", ".") +
+        f"📞 *Untuk melanjutkan pembelian:*\n"
+        f"Hubungi {config.admin_contact}\n\n"
+        f"📝 Kirim:\n"
+        f"• User ID: `{query.from_user.id}`\n"
+        f"• Paket: {package} Token\n"
+        f"• Bukti transfer"
+    )
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=get_back_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_cancel_download(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle download cancellation."""
+    if context.user_data:
+        context.user_data.clear()
+    
+    await query.edit_message_text(
+        "❌ *Download Dibatalkan*\n\n"
+        "Gunakan /start untuk memulai lagi.",
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard(),
+    )
+
+
+async def handle_admin_callback(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    data: str,
+    db: Database,
+    user_id: int,
+) -> None:
+    """Handle admin-specific callbacks."""
+    token_manager = TokenManager(db)
+    
+    if not token_manager.is_admin(user_id):
+        await query.edit_message_text("❌ Anda tidak memiliki akses admin.")
+        return
+    
+    action = data.replace("admin_", "")
+    
+    if action == "users":
+        users = db.get_all_users()[:10]
+        text = "👥 *Daftar User*\n\n"
+        for u in users:
+            name = u.get("username") or u.get("first_name") or "Unknown"
+            banned = "🚫" if u["is_banned"] else ""
+            text += f"• `{u['user_id']}` - {name} {banned}\n  💰 {u['tokens']} token\n"
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown",
+        )
+    
+    elif action == "stats":
+        stats = db.get_user_stats()
+        text = (
+            "📊 *Statistik*\n\n"
+            f"👥 Total User: `{stats['total_users']}`\n"
+            f"🪙 Total Token: `{stats['total_tokens']}`\n"
+            f"📥 Total Download: `{stats['total_downloads']}`"
+        )
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown",
+        )
+    
+    elif action == "add_token":
+        text = (
+            "➕ *Tambah Token*\n\n"
+            "Gunakan perintah:\n"
+            "`/addtoken <user_id> <jumlah>`\n\n"
+            "Contoh:\n"
+            "`/addtoken 123456789 10`"
+        )
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown",
+        )
+    
+    elif action == "ban":
+        text = (
+            "🚫 *Ban/Unban User*\n\n"
+            "Gunakan perintah:\n"
+            "`/ban <user_id>` - Ban user\n"
+            "`/unban <user_id>` - Unban user\n\n"
+            "Contoh:\n"
+            "`/ban 123456789`"
+        )
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown",
+        )
+    
+    elif action == "broadcast":
+        text = (
+            "📢 *Broadcast*\n\n"
+            "Gunakan perintah:\n"
+            "`/broadcast <pesan>`\n\n"
+            "Contoh:\n"
+            "`/broadcast Halo semua! Ada promo hari ini.`"
+        )
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown",
+        )

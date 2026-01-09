@@ -1,27 +1,34 @@
 # YouTube Downloader Telegram Bot
 
-A Telegram bot for downloading media from YouTube and other platforms, then automatically uploading to Google Drive.
+Bot Telegram untuk mengunduh video dan musik dari YouTube dengan sistem token berbayar. Siap untuk penggunaan komersial.
 
-## Features
+## Fitur Utama
 
-- 🔐 **User Authentication**: Whitelist-based security - only authorized users can use the bot
-- 🎵 **Audio Download**: Extract audio as MP3 (192kbps)
-- 📹 **Video Quality Options**: 360p, 720p, 1080p, or Best Quality (2K/4K)
-- ☁️ **Google Drive Integration**: Automatic upload via rclone
-- 🧹 **Auto Cleanup**: Files are deleted from VPS after successful upload
-- 📢 **Real-time Notifications**: Status updates for downloading, uploading, and completion
-- 🍪 **Cookie Support**: Optional cookies.txt for age-restricted content
+- 🎵 **YouTube Musik** - Download audio MP3 (192kbps)
+- 🎬 **YouTube Video** - Download video (360p, 720p, 1080p, Best Quality)
+- 📋 **YouTube Playlist** - Download seluruh playlist sekaligus
+- 💰 **Sistem Token** - 1 Token = 1 Video/Musik (siap komersial)
+- 👑 **Panel Admin** - Kelola user, token, dan statistik
+- 📲 **Pengiriman Fleksibel** - Via Telegram (maks 50MB) atau Google Drive (unlimited)
+- 🔗 **Link Google Drive** - Dapatkan link langsung setelah upload
+- 📊 **Preview Video** - Lihat detail video sebelum download
+- 🧹 **Auto Cleanup** - File dihapus otomatis setelah upload
+- 🍪 **Cookie Support** - Untuk konten yang memerlukan login
 
-## Supported Platforms
+## Menu Bot
 
-- YouTube
-- Twitter/X
-- TikTok
-- Instagram
-- Vimeo
-- Reddit
-- Twitch
-- And many more (any platform supported by yt-dlp)
+```
+1. 🎵 YouTube Musik - Download audio MP3
+2. 🎬 YouTube Video - Download video (pilih kualitas)
+3. 📋 YouTube Playlist - Download playlist lengkap
+```
+
+## Sistem Token
+
+- 1 Token = 1 Video/Musik
+- Playlist dihitung per video
+- Beli token via admin
+- Harga token dapat dikonfigurasi
 
 ## Prerequisites
 
@@ -114,17 +121,44 @@ pip install -r requirements.txt
 
 ### 5. Configure Environment Variables
 
-Create a `.env` file or export environment variables:
+Copy `.env.example` ke `.env` dan sesuaikan:
 
 ```bash
-# Required
-export BOT_TOKEN="your_telegram_bot_token"
-export ALLOWED_USER_IDS="123456789,987654321"  # Comma-separated user IDs
+cp .env.example .env
+nano .env
+```
 
-# Optional
-export RCLONE_REMOTE="gdrive:YouTube_Downloads"  # Default: gdrive:YouTube_Downloads
-export DOWNLOAD_DIR="/tmp/youtube_downloads"      # Default: /tmp/youtube_downloads
-export COOKIES_FILE="/path/to/cookies.txt"        # For age-restricted content
+Konfigurasi wajib:
+```bash
+# Telegram Bot Token (dari BotFather)
+BOT_TOKEN=your_telegram_bot_token
+
+# Admin User IDs (comma-separated)
+ADMIN_USER_IDS=123456789
+
+# Admin Contact
+ADMIN_CONTACT=@your_telegram_username
+```
+
+Konfigurasi opsional:
+```bash
+# Google Drive remote
+RCLONE_REMOTE=gdrive:YouTube_Downloads
+
+# Download directory
+DOWNLOAD_DIR=/tmp/youtube_downloads
+
+# Cookies untuk konten terproteksi
+COOKIES_FILE=/path/to/cookies.txt
+
+# WhatsApp admin (opsional)
+ADMIN_WHATSAPP=+6281234567890
+
+# Harga token (dalam Rupiah)
+TOKEN_PRICE_1=5000
+TOKEN_PRICE_5=20000
+TOKEN_PRICE_10=35000
+TOKEN_PRICE_25=75000
 ```
 
 ### 6. Run the Bot
@@ -134,7 +168,7 @@ export COOKIES_FILE="/path/to/cookies.txt"        # For age-restricted content
 source venv/bin/activate
 
 # Run the bot
-python main.py
+python run.py
 ```
 
 ## Running as a System Service
@@ -156,10 +190,8 @@ After=network.target
 Type=simple
 User=your_username
 WorkingDirectory=/path/to/youtube-downloader
-Environment="BOT_TOKEN=your_token_here"
-Environment="ALLOWED_USER_IDS=123456789"
-Environment="RCLONE_REMOTE=gdrive:YouTube_Downloads"
-ExecStart=/path/to/youtube-downloader/venv/bin/python main.py
+EnvironmentFile=/path/to/youtube-downloader/.env
+ExecStart=/path/to/youtube-downloader/venv/bin/python run.py
 Restart=always
 RestartSec=10
 
@@ -181,23 +213,49 @@ sudo systemctl status youtube-bot
 journalctl -u youtube-bot -f
 ```
 
-## Usage
+## Penggunaan
 
-1. Start a chat with your bot on Telegram
-2. Send a video URL (YouTube, Twitter, TikTok, etc.)
-3. Select your preferred format from the inline keyboard
-4. Wait for the bot to download and upload to Google Drive
-5. Done! ✅
+1. Mulai chat dengan bot di Telegram
+2. Pilih jenis download (Musik/Video/Playlist)
+3. Kirim link YouTube
+4. Lihat preview dan konfirmasi
+5. Pilih kualitas
+6. Pilih metode pengiriman (Telegram/Drive)
+7. Tunggu proses selesai ✅
 
-## Configuration Options
+## Perintah Bot
 
-| Environment Variable | Description | Default |
-|---------------------|-------------|---------|
-| `BOT_TOKEN` | Telegram bot token from BotFather | Required |
-| `ALLOWED_USER_IDS` | Comma-separated list of authorized user IDs | Required |
+### User Commands
+| Perintah | Deskripsi |
+|----------|-----------|
+| `/start` | Mulai bot dan lihat menu |
+| `/help` | Tampilkan bantuan |
+| `/token` | Cek saldo token |
+| `/history` | Lihat riwayat download |
+| `/buy` | Beli token |
+
+### Admin Commands
+| Perintah | Deskripsi |
+|----------|-----------|
+| `/admin` | Panel admin |
+| `/addtoken <user_id> <jumlah>` | Tambah token ke user |
+| `/stats` | Statistik detail |
+| `/broadcast <pesan>` | Broadcast ke semua user |
+| `/ban <user_id>` | Ban user |
+| `/unban <user_id>` | Unban user |
+| `/users` | Daftar semua user |
+
+## Konfigurasi
+
+| Environment Variable | Deskripsi | Default |
+|---------------------|-----------|---------|
+| `BOT_TOKEN` | Token bot Telegram | Required |
+| `ADMIN_USER_IDS` | User ID admin (comma-separated) | Required |
+| `ADMIN_CONTACT` | Username Telegram admin | Required |
 | `RCLONE_REMOTE` | rclone remote destination | `gdrive:YouTube_Downloads` |
-| `DOWNLOAD_DIR` | Temporary download directory | `/tmp/youtube_downloads` |
-| `COOKIES_FILE` | Path to cookies.txt for age-restricted content | None |
+| `DOWNLOAD_DIR` | Direktori download sementara | `/tmp/youtube_downloads` |
+| `COOKIES_FILE` | Path ke cookies.txt | None |
+| `TOKEN_PRICE_*` | Harga paket token | See .env.example |
 
 ## Cookies Setup (Optional)
 
@@ -211,20 +269,54 @@ For age-restricted or login-required content:
 
 ## Troubleshooting
 
-### Bot doesn't respond
-- Verify `BOT_TOKEN` is correct
-- Check if your User ID is in `ALLOWED_USER_IDS`
-- Check logs: `journalctl -u youtube-bot -f`
+### Bot tidak merespon
+- Verifikasi `BOT_TOKEN` sudah benar
+- Pastikan User ID ada di `ADMIN_USER_IDS` jika ingin akses admin
+- Cek logs: `journalctl -u youtube-bot -f`
 
-### Download fails
-- Make sure `yt-dlp` is up to date: `pip install -U yt-dlp`
-- Check if the video is available in your region
-- For age-restricted content, configure cookies.txt
+### Download gagal
+- Update yt-dlp: `pip install -U yt-dlp`
+- Pastikan video tersedia di region Anda
+- Untuk konten age-restricted, konfigurasi cookies.txt
 
-### Upload fails
-- Verify rclone configuration: `rclone lsd gdrive:`
-- Check if you have enough Google Drive storage
-- Ensure the remote name matches `RCLONE_REMOTE`
+### Upload gagal
+- Verifikasi konfigurasi rclone: `rclone lsd gdrive:`
+- Pastikan storage Google Drive cukup
+- Pastikan nama remote sesuai `RCLONE_REMOTE`
+
+### Token tidak terpotong
+- Pastikan user memiliki saldo token cukup
+- Admin tidak dipotong tokennya
+
+## Struktur Folder
+
+```
+youtube-downloader/
+├── bot/
+│   ├── __init__.py
+│   ├── main.py          # Bot initialization
+│   ├── config.py        # Configuration
+│   ├── database.py      # SQLite database
+│   ├── handlers/        # Command & callback handlers
+│   │   ├── start.py
+│   │   ├── admin.py
+│   │   ├── download.py
+│   │   └── callback.py
+│   ├── services/        # Business logic
+│   │   ├── downloader.py
+│   │   ├── uploader.py
+│   │   └── token_manager.py
+│   ├── utils/           # Helper functions
+│   │   ├── validators.py
+│   │   ├── helpers.py
+│   │   └── keyboards.py
+│   └── models/          # Data models
+│       └── user.py
+├── data/               # Database storage
+├── .env.example        # Environment template
+├── requirements.txt
+└── run.py              # Entry point
+```
 
 ## License
 
