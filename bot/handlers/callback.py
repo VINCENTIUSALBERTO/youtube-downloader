@@ -30,7 +30,7 @@ from bot.utils.keyboards import (
     get_playlist_video_selection_keyboard,
     get_playlist_format_after_selection_keyboard,
 )
-from bot.utils.helpers import format_download_result, format_file_size
+from bot.utils.helpers import format_download_result, format_file_size, sanitize_filename
 from bot.config import config
 
 logger = logging.getLogger(__name__)
@@ -356,13 +356,12 @@ async def handle_delivery_selection(
         playlist_info = pending_info
     
     # Clear pending data and user state after download starts
-    context.user_data.pop("pending_url", None)
-    context.user_data.pop("pending_info", None)
-    context.user_data.pop("selected_videos", None)
-    context.user_data.pop("mode", None)  # Clear mode to prevent next link being treated same way
-    context.user_data.pop("url_type", None)
-    context.user_data.pop("format", None)
-    context.user_data.pop("required_tokens", None)
+    keys_to_clear = [
+        "pending_url", "pending_info", "selected_videos",
+        "mode", "url_type", "format", "required_tokens", "selection_page"
+    ]
+    for key in keys_to_clear:
+        context.user_data.pop(key, None)
     
     # Show processing message
     if url_type == "playlist" or mode == "playlist":
@@ -617,12 +616,12 @@ async def process_playlist_download(
         return
     
     # Sanitize playlist title for folder name
-    from bot.utils.helpers import sanitize_filename
     playlist_folder = sanitize_filename(playlist_title)
     
     successful_downloads = 0
     failed_downloads = 0
     
+    # Determine if audio format based on format key
     is_audio = format_key in ["mp3", "playlist_mp3"]
     actual_format = "mp3" if is_audio else format_key.replace("playlist_", "")
     
@@ -636,7 +635,8 @@ async def process_playlist_download(
         try:
             await update_status(f"⬇️ Download ({i+1}/{total_videos})\n{video_title}...")
             
-            result = await downloader.download(video_url, actual_format)
+            # Pass update_status callback to download for progress updates
+            result = await downloader.download(video_url, actual_format, update_status)
             
             if not result.success:
                 failed_downloads += 1
