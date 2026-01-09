@@ -56,7 +56,11 @@ def get_format_keyboard(download_type: str) -> InlineKeyboardMarkup:
     else:  # playlist
         keyboard = [
             [InlineKeyboardButton("🎵 Semua MP3", callback_data="format_playlist_mp3")],
-            [InlineKeyboardButton("📹 Semua Video 720p", callback_data="format_playlist_720p")],
+            [InlineKeyboardButton("📹 Semua Video 360p", callback_data="format_playlist_360p")],
+            [InlineKeyboardButton("📺 Semua Video 720p", callback_data="format_playlist_720p")],
+            [InlineKeyboardButton("🎬 Semua Video 1080p", callback_data="format_playlist_1080p")],
+            [InlineKeyboardButton("⭐ Semua Best Quality", callback_data="format_playlist_best")],
+            [InlineKeyboardButton("📋 Pilih Video Tertentu", callback_data="playlist_select_videos")],
             [InlineKeyboardButton("🔙 Kembali", callback_data="back_menu")],
         ]
     return InlineKeyboardMarkup(keyboard)
@@ -167,5 +171,80 @@ def get_cancel_keyboard() -> InlineKeyboardMarkup:
     """Get cancel button keyboard."""
     keyboard = [
         [InlineKeyboardButton("❌ Batal", callback_data="cancel_download")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_playlist_video_selection_keyboard(
+    videos: list,
+    selected_ids: list,
+    page: int = 0,
+    per_page: int = 8,
+) -> InlineKeyboardMarkup:
+    """
+    Get keyboard for selecting videos from playlist.
+    
+    Args:
+        videos: List of video dicts with 'id' and 'title'
+        selected_ids: List of already selected video IDs
+        page: Current page number (0-indexed)
+        per_page: Number of videos per page
+    """
+    keyboard = []
+    
+    total_videos = len(videos)
+    total_pages = (total_videos + per_page - 1) // per_page
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, total_videos)
+    
+    # Add video selection buttons
+    for i, video in enumerate(videos[start_idx:end_idx], start=start_idx + 1):
+        video_id = video.get("id", "")
+        title = video.get("title", f"Video {i}")[:35]
+        is_selected = video_id in selected_ids
+        
+        prefix = "✅ " if is_selected else "⬜ "
+        callback_data = f"playlist_toggle_{video_id}"
+        
+        keyboard.append([InlineKeyboardButton(f"{prefix}{i}. {title}", callback_data=callback_data)])
+    
+    # Navigation buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"playlist_page_{page - 1}"))
+    
+    if selected_ids:
+        nav_buttons.append(InlineKeyboardButton(f"({len(selected_ids)} dipilih)", callback_data="noop"))
+    
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlist_page_{page + 1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    # Selection actions
+    action_buttons = []
+    action_buttons.append(InlineKeyboardButton("☑️ Pilih Semua", callback_data="playlist_select_all"))
+    action_buttons.append(InlineKeyboardButton("❎ Batal Pilih", callback_data="playlist_deselect_all"))
+    keyboard.append(action_buttons)
+    
+    # Confirm and back buttons
+    if selected_ids:
+        keyboard.append([InlineKeyboardButton(f"✅ Lanjut Download ({len(selected_ids)} video)", callback_data="playlist_confirm_selection")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="back_format")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_playlist_format_after_selection_keyboard() -> InlineKeyboardMarkup:
+    """Get format selection keyboard after videos are selected."""
+    keyboard = [
+        [InlineKeyboardButton("🎵 Download MP3", callback_data="selected_format_mp3")],
+        [InlineKeyboardButton("📹 Video 360p", callback_data="selected_format_360p")],
+        [InlineKeyboardButton("📺 Video 720p (HD)", callback_data="selected_format_720p")],
+        [InlineKeyboardButton("🎬 Video 1080p", callback_data="selected_format_1080p")],
+        [InlineKeyboardButton("⭐ Best Quality", callback_data="selected_format_best")],
+        [InlineKeyboardButton("🔙 Kembali", callback_data="back_to_selection")],
     ]
     return InlineKeyboardMarkup(keyboard)
