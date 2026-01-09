@@ -27,6 +27,8 @@ from bot.utils.keyboards import (
     get_topup_confirm_keyboard,
     get_admin_topup_action_keyboard,
     get_registration_keyboard,
+    get_playlist_video_selection_keyboard,
+    get_playlist_format_after_selection_keyboard,
 )
 from bot.utils.helpers import format_download_result, format_file_size
 from bot.config import config
@@ -115,6 +117,35 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif data.startswith("reject_topup_"):
         await handle_reject_topup(query, context, data, db, user.id)
+    
+    # Playlist video selection callbacks
+    elif data == "playlist_select_videos":
+        await handle_playlist_select_videos(query, context)
+    
+    elif data.startswith("playlist_toggle_"):
+        await handle_playlist_toggle_video(query, context, data)
+    
+    elif data.startswith("playlist_page_"):
+        await handle_playlist_page(query, context, data)
+    
+    elif data == "playlist_select_all":
+        await handle_playlist_select_all(query, context)
+    
+    elif data == "playlist_deselect_all":
+        await handle_playlist_deselect_all(query, context)
+    
+    elif data == "playlist_confirm_selection":
+        await handle_playlist_confirm_selection(query, context)
+    
+    elif data.startswith("selected_format_"):
+        await handle_selected_format(query, context, data)
+    
+    elif data == "back_to_selection":
+        await handle_back_to_selection(query, context)
+    
+    elif data == "noop":
+        # Do nothing, just acknowledge
+        pass
     
     # Admin callbacks
     elif data.startswith("admin_"):
@@ -211,7 +242,7 @@ async def handle_format_selection(query, context: ContextTypes.DEFAULT_TYPE, dat
         f"✅ *Kualitas Dipilih:* {format_label}\n\n"
         f"📤 *Pilih metode pengiriman:*\n\n"
         f"• *Telegram* - File dikirim langsung ke chat\n"
-        f"  ⚠️ Maksimal 50MB\n\n"
+        f"  ⚠️ Maksimal 500MB\n\n"
         f"• *Google Drive* - Unlimited ukuran\n"
         f"  📎 Anda akan mendapat link download",
         reply_markup=get_delivery_keyboard(),
@@ -242,7 +273,7 @@ async def handle_auto_format_selection(query, context: ContextTypes.DEFAULT_TYPE
         f"✅ *Format Dipilih:* {format_label}\n\n"
         f"📤 *Pilih metode pengiriman:*\n\n"
         f"• *Telegram* - File dikirim langsung ke chat\n"
-        f"  ⚠️ Maksimal 50MB\n\n"
+        f"  ⚠️ Maksimal 500MB\n\n"
         f"• *Google Drive* - Unlimited ukuran\n"
         f"  📎 Anda akan mendapat link download",
         reply_markup=get_delivery_keyboard(),
@@ -267,6 +298,7 @@ async def handle_delivery_selection(
     url_type = user_data.get("url_type", "video")
     required_tokens = user_data.get("required_tokens", 1)
     pending_info = user_data.get("pending_info")
+    selected_videos = user_data.get("selected_videos")  # For playlist video selection
     
     if not url:
         await query.edit_message_text(
@@ -318,20 +350,43 @@ async def handle_delivery_selection(
         title=title,
     )
     
-    # Clear pending data
+    # Get playlist info for playlist downloads
+    playlist_info = None
+    if url_type == "playlist" or mode == "playlist":
+        playlist_info = pending_info
+    
+    # Clear pending data and user state after download starts
     context.user_data.pop("pending_url", None)
     context.user_data.pop("pending_info", None)
+    context.user_data.pop("selected_videos", None)
+    context.user_data.pop("mode", None)  # Clear mode to prevent next link being treated same way
+    context.user_data.pop("url_type", None)
+    context.user_data.pop("format", None)
+    context.user_data.pop("required_tokens", None)
     
     # Show processing message
-    await query.edit_message_text(
-        f"⏳ *Memproses Download...*\n\n"
-        f"📦 Kualitas: `{format_key.upper()}`\n"
-        f"📤 Pengiriman: `{delivery_method.title()}`\n"
-        f"💰 Token Sisa: `{new_balance}`\n\n"
-        f"Mohon tunggu, proses ini mungkin memakan waktu beberapa menit.",
-        parse_mode="Markdown",
-        reply_markup=get_cancel_keyboard(),
-    )
+    if url_type == "playlist" or mode == "playlist":
+        video_count = playlist_info.get("count", 0) if playlist_info else 0
+        await query.edit_message_text(
+            f"⏳ *Memproses Download Playlist...*\n\n"
+            f"📋 Jumlah Video: `{video_count}`\n"
+            f"📦 Kualitas: `{format_key.upper()}`\n"
+            f"📤 Pengiriman: `{delivery_method.title()}`\n"
+            f"💰 Token Sisa: `{new_balance}`\n\n"
+            f"Mohon tunggu, proses playlist mungkin memakan waktu lama.",
+            parse_mode="Markdown",
+            reply_markup=get_cancel_keyboard(),
+        )
+    else:
+        await query.edit_message_text(
+            f"⏳ *Memproses Download...*\n\n"
+            f"📦 Kualitas: `{format_key.upper()}`\n"
+            f"📤 Pengiriman: `{delivery_method.title()}`\n"
+            f"💰 Token Sisa: `{new_balance}`\n\n"
+            f"Mohon tunggu, proses ini mungkin memakan waktu beberapa menit.",
+            parse_mode="Markdown",
+            reply_markup=get_cancel_keyboard(),
+        )
     
     # Start download process
     asyncio.create_task(
@@ -344,6 +399,9 @@ async def handle_delivery_selection(
             format_key=format_key,
             delivery_method=delivery_method,
             user_id=user.id,
+            is_playlist=(url_type == "playlist" or mode == "playlist"),
+            playlist_info=playlist_info,
+            selected_videos=selected_videos,
         )
     )
 
@@ -357,6 +415,9 @@ async def process_download(
     format_key: str,
     delivery_method: str,
     user_id: int,
+    is_playlist: bool = False,
+    playlist_info: dict = None,
+    selected_videos: list = None,
 ) -> None:
     """Process the actual download and upload."""
     try:
@@ -378,91 +439,38 @@ async def process_download(
             except Exception:
                 pass
         
-        # Download
-        await update_status("Mengunduh video...")
-        result = await downloader.download(url, format_key, update_status)
-        
-        if not result.success:
-            db.update_download(download_id, status="failed")
-            await query.edit_message_text(
-                f"❌ *Download Gagal*\n\n"
-                f"{result.error or 'Terjadi kesalahan'}",
-                parse_mode="Markdown",
-                reply_markup=get_back_keyboard(),
+        if is_playlist and playlist_info:
+            # Handle playlist download
+            await process_playlist_download(
+                query=query,
+                context=context,
+                db=db,
+                download_id=download_id,
+                url=url,
+                format_key=format_key,
+                delivery_method=delivery_method,
+                user_id=user_id,
+                playlist_info=playlist_info,
+                selected_videos=selected_videos,
+                downloader=downloader,
+                uploader=uploader,
+                update_status=update_status,
             )
-            return
-        
-        # Update download record with title
-        db.update_download(
-            download_id,
-            title=result.title,
-            duration=result.duration,
-            file_size=result.file_size,
-        )
-        
-        # Upload
-        await update_status("Mengunggah file...")
-        
-        drive_link = None
-        is_audio = format_key == "mp3"
-        
-        if delivery_method == "telegram":
-            upload_result = await uploader.upload_to_telegram(
-                bot=context.bot,
-                chat_id=query.message.chat_id,
-                file_path=result.file_path,
-                caption=f"🎵 *{result.title}*" if is_audio else f"🎬 *{result.title}*",
-                is_audio=is_audio,
+        else:
+            # Handle single video download
+            await process_single_download(
+                query=query,
+                context=context,
+                db=db,
+                download_id=download_id,
+                url=url,
+                format_key=format_key,
+                delivery_method=delivery_method,
+                user_id=user_id,
+                downloader=downloader,
+                uploader=uploader,
+                update_status=update_status,
             )
-            
-            if not upload_result.success:
-                # Fallback to Drive if Telegram fails
-                await update_status("Telegram gagal, menggunakan Drive...")
-                upload_result = await uploader.upload_to_drive(result.file_path)
-                delivery_method = "drive"
-                drive_link = upload_result.drive_link
-                
-        else:  # drive
-            upload_result = await uploader.upload_to_drive(result.file_path)
-            drive_link = upload_result.drive_link
-        
-        # Cleanup downloaded file
-        downloader.cleanup_file(result.file_path)
-        
-        if not upload_result.success:
-            db.update_download(download_id, status="failed")
-            await query.edit_message_text(
-                f"❌ *Upload Gagal*\n\n"
-                f"{upload_result.error or 'Terjadi kesalahan'}",
-                parse_mode="Markdown",
-                reply_markup=get_back_keyboard(),
-            )
-            return
-        
-        # Update download record
-        db.update_download(
-            download_id,
-            status="completed",
-            drive_link=drive_link,
-        )
-        
-        # Send success message
-        success_message = format_download_result(
-            title=result.title,
-            quality=format_key,
-            file_size=result.file_size,
-            duration=result.duration,
-            delivery_method=delivery_method,
-            drive_link=drive_link,
-        )
-        
-        await query.edit_message_text(
-            success_message,
-            parse_mode="Markdown",
-            reply_markup=get_back_keyboard(),
-        )
-        
-        logger.info(f"Download completed for user {user_id}: {result.title}")
         
     except Exception as e:
         logger.error(f"Download process error: {e}")
@@ -473,6 +481,238 @@ async def process_download(
             parse_mode="Markdown",
             reply_markup=get_back_keyboard(),
         )
+
+
+async def process_single_download(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    download_id: int,
+    url: str,
+    format_key: str,
+    delivery_method: str,
+    user_id: int,
+    downloader: DownloaderService,
+    uploader: UploaderService,
+    update_status,
+) -> None:
+    """Process a single video download."""
+    # Download
+    await update_status("Mengunduh video...")
+    result = await downloader.download(url, format_key, update_status)
+    
+    if not result.success:
+        db.update_download(download_id, status="failed")
+        await query.edit_message_text(
+            f"❌ *Download Gagal*\n\n"
+            f"{result.error or 'Terjadi kesalahan'}",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    # Update download record with title
+    db.update_download(
+        download_id,
+        title=result.title,
+        duration=result.duration,
+        file_size=result.file_size,
+    )
+    
+    # Upload
+    await update_status("Mengunggah file...")
+    
+    drive_link = None
+    is_audio = format_key == "mp3"
+    
+    if delivery_method == "telegram":
+        upload_result = await uploader.upload_to_telegram(
+            bot=context.bot,
+            chat_id=query.message.chat_id,
+            file_path=result.file_path,
+            caption=f"🎵 *{result.title}*" if is_audio else f"🎬 *{result.title}*",
+            is_audio=is_audio,
+        )
+        
+        if not upload_result.success:
+            # Fallback to Drive if Telegram fails
+            await update_status("Telegram gagal, menggunakan Drive...")
+            upload_result = await uploader.upload_to_drive(result.file_path)
+            delivery_method = "drive"
+            drive_link = upload_result.drive_link
+            
+    else:  # drive
+        upload_result = await uploader.upload_to_drive(result.file_path)
+        drive_link = upload_result.drive_link
+    
+    # Cleanup downloaded file
+    downloader.cleanup_file(result.file_path)
+    
+    if not upload_result.success:
+        db.update_download(download_id, status="failed")
+        await query.edit_message_text(
+            f"❌ *Upload Gagal*\n\n"
+            f"{upload_result.error or 'Terjadi kesalahan'}",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    # Update download record
+    db.update_download(
+        download_id,
+        status="completed",
+        drive_link=drive_link,
+    )
+    
+    # Send success message
+    success_message = format_download_result(
+        title=result.title,
+        quality=format_key,
+        file_size=result.file_size,
+        duration=result.duration,
+        delivery_method=delivery_method,
+        drive_link=drive_link,
+    )
+    
+    await query.edit_message_text(
+        success_message,
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard(),
+    )
+    
+    logger.info(f"Download completed for user {user_id}: {result.title}")
+
+
+async def process_playlist_download(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    db: Database,
+    download_id: int,
+    url: str,
+    format_key: str,
+    delivery_method: str,
+    user_id: int,
+    playlist_info: dict,
+    selected_videos: list,
+    downloader: DownloaderService,
+    uploader: UploaderService,
+    update_status,
+) -> None:
+    """Process playlist download with all videos."""
+    playlist_title = playlist_info.get("title", "Unknown Playlist")
+    videos = playlist_info.get("videos", [])
+    
+    # If specific videos selected, filter them
+    if selected_videos:
+        videos = [v for v in videos if v.get("id") in selected_videos]
+    
+    total_videos = len(videos)
+    if total_videos == 0:
+        await query.edit_message_text(
+            "❌ *Tidak ada video dalam playlist*",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    # Sanitize playlist title for folder name
+    from bot.utils.helpers import sanitize_filename
+    playlist_folder = sanitize_filename(playlist_title)
+    
+    successful_downloads = 0
+    failed_downloads = 0
+    
+    is_audio = format_key in ["mp3", "playlist_mp3"]
+    actual_format = "mp3" if is_audio else format_key.replace("playlist_", "")
+    
+    await update_status(f"Memulai download playlist: {playlist_title[:30]}...")
+    
+    for i, video in enumerate(videos):
+        video_id = video.get("id")
+        video_title = video.get("title", f"Video {i+1}")[:40]
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        try:
+            await update_status(f"⬇️ Download ({i+1}/{total_videos})\n{video_title}...")
+            
+            result = await downloader.download(video_url, actual_format)
+            
+            if not result.success:
+                failed_downloads += 1
+                logger.warning(f"Failed to download video {video_id}: {result.error}")
+                continue
+            
+            # Upload to destination
+            await update_status(f"☁️ Upload ({i+1}/{total_videos})\n{video_title}...")
+            
+            if delivery_method == "telegram":
+                upload_result = await uploader.upload_to_telegram(
+                    bot=context.bot,
+                    chat_id=query.message.chat_id,
+                    file_path=result.file_path,
+                    caption=f"🎵 *{result.title}*\n\n📋 Playlist: {playlist_title[:30]}\n📊 ({i+1}/{total_videos})" if is_audio else f"🎬 *{result.title}*\n\n📋 Playlist: {playlist_title[:30]}\n📊 ({i+1}/{total_videos})",
+                    is_audio=is_audio,
+                )
+                
+                if not upload_result.success:
+                    # Fallback to Drive with playlist subfolder
+                    upload_result = await uploader.upload_to_drive(
+                        result.file_path,
+                        subfolder=f"Playlists/{playlist_folder}",
+                    )
+            else:
+                # Upload to Drive with playlist subfolder
+                upload_result = await uploader.upload_to_drive(
+                    result.file_path,
+                    subfolder=f"Playlists/{playlist_folder}",
+                )
+            
+            # Cleanup file after upload
+            downloader.cleanup_file(result.file_path)
+            
+            if upload_result.success:
+                successful_downloads += 1
+            else:
+                failed_downloads += 1
+                
+        except Exception as e:
+            logger.error(f"Error processing playlist video {video_id}: {e}")
+            failed_downloads += 1
+    
+    # Update download record
+    db.update_download(
+        download_id,
+        status="completed" if successful_downloads > 0 else "failed",
+        title=playlist_title,
+    )
+    
+    # Send summary message
+    summary_text = (
+        f"✅ *Download Playlist Selesai!*\n\n"
+        f"📋 *Playlist:*\n`{playlist_title[:60]}`\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Ringkasan:*\n"
+        f"├ ✅ Berhasil: `{successful_downloads}` video\n"
+        f"├ ❌ Gagal: `{failed_downloads}` video\n"
+        f"└ 📁 Total: `{total_videos}` video\n\n"
+    )
+    
+    if delivery_method == "drive":
+        summary_text += (
+            f"📂 *Lokasi Google Drive:*\n"
+            f"`{config.rclone_remote}/Playlists/{playlist_folder}`\n\n"
+        )
+    
+    summary_text += "Terima kasih telah menggunakan layanan kami! 🙏"
+    
+    await query.edit_message_text(
+        summary_text,
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard(),
+    )
+    
+    logger.info(f"Playlist download completed for user {user_id}: {playlist_title} ({successful_downloads}/{total_videos})")
 
 
 async def handle_my_tokens(query, db: Database, user_id: int) -> None:
@@ -1028,3 +1268,263 @@ async def handle_admin_callback(
             reply_markup=get_admin_keyboard(),
             parse_mode="Markdown",
         )
+
+
+# Playlist video selection handlers
+
+async def handle_playlist_select_videos(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle starting video selection for playlist."""
+    user_data = context.user_data or {}
+    pending_info = user_data.get("pending_info")
+    
+    if not pending_info or not isinstance(pending_info, dict):
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*\n\n"
+            "Silakan kirim ulang link playlist.",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    videos = pending_info.get("videos", [])
+    if not videos:
+        await query.edit_message_text(
+            "❌ *Playlist Kosong*\n\n"
+            "Tidak ada video dalam playlist ini.",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    # Initialize selected videos list
+    if context.user_data is None:
+        context.user_data = {}
+    context.user_data["selected_videos"] = []
+    context.user_data["selection_page"] = 0
+    
+    playlist_title = pending_info.get("title", "Playlist")
+    
+    await query.edit_message_text(
+        f"📋 *Pilih Video dari Playlist*\n\n"
+        f"📌 *{playlist_title[:50]}*\n\n"
+        f"Total: `{len(videos)}` video\n\n"
+        f"Ketuk video untuk memilih/membatalkan:",
+        reply_markup=get_playlist_video_selection_keyboard(videos, [], 0),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_playlist_toggle_video(query, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+    """Handle toggling a video selection."""
+    video_id = data.replace("playlist_toggle_", "")
+    user_data = context.user_data or {}
+    
+    pending_info = user_data.get("pending_info")
+    if not pending_info:
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    selected_videos = user_data.get("selected_videos", [])
+    page = user_data.get("selection_page", 0)
+    videos = pending_info.get("videos", [])
+    
+    # Toggle selection
+    if video_id in selected_videos:
+        selected_videos.remove(video_id)
+    else:
+        selected_videos.append(video_id)
+    
+    context.user_data["selected_videos"] = selected_videos
+    
+    playlist_title = pending_info.get("title", "Playlist")
+    
+    await query.edit_message_text(
+        f"📋 *Pilih Video dari Playlist*\n\n"
+        f"📌 *{playlist_title[:50]}*\n\n"
+        f"Total: `{len(videos)}` video | Dipilih: `{len(selected_videos)}`\n\n"
+        f"Ketuk video untuk memilih/membatalkan:",
+        reply_markup=get_playlist_video_selection_keyboard(videos, selected_videos, page),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_playlist_page(query, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+    """Handle playlist page navigation."""
+    page = int(data.replace("playlist_page_", ""))
+    user_data = context.user_data or {}
+    
+    pending_info = user_data.get("pending_info")
+    if not pending_info:
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    selected_videos = user_data.get("selected_videos", [])
+    videos = pending_info.get("videos", [])
+    
+    context.user_data["selection_page"] = page
+    
+    playlist_title = pending_info.get("title", "Playlist")
+    
+    await query.edit_message_text(
+        f"📋 *Pilih Video dari Playlist*\n\n"
+        f"📌 *{playlist_title[:50]}*\n\n"
+        f"Total: `{len(videos)}` video | Dipilih: `{len(selected_videos)}`\n\n"
+        f"Ketuk video untuk memilih/membatalkan:",
+        reply_markup=get_playlist_video_selection_keyboard(videos, selected_videos, page),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_playlist_select_all(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle selecting all videos."""
+    user_data = context.user_data or {}
+    
+    pending_info = user_data.get("pending_info")
+    if not pending_info:
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    videos = pending_info.get("videos", [])
+    page = user_data.get("selection_page", 0)
+    
+    # Select all videos
+    selected_videos = [v.get("id") for v in videos if v.get("id")]
+    context.user_data["selected_videos"] = selected_videos
+    
+    playlist_title = pending_info.get("title", "Playlist")
+    
+    await query.edit_message_text(
+        f"📋 *Pilih Video dari Playlist*\n\n"
+        f"📌 *{playlist_title[:50]}*\n\n"
+        f"Total: `{len(videos)}` video | Dipilih: `{len(selected_videos)}`\n\n"
+        f"✅ Semua video telah dipilih!",
+        reply_markup=get_playlist_video_selection_keyboard(videos, selected_videos, page),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_playlist_deselect_all(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle deselecting all videos."""
+    user_data = context.user_data or {}
+    
+    pending_info = user_data.get("pending_info")
+    if not pending_info:
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    videos = pending_info.get("videos", [])
+    page = user_data.get("selection_page", 0)
+    
+    # Deselect all
+    context.user_data["selected_videos"] = []
+    
+    playlist_title = pending_info.get("title", "Playlist")
+    
+    await query.edit_message_text(
+        f"📋 *Pilih Video dari Playlist*\n\n"
+        f"📌 *{playlist_title[:50]}*\n\n"
+        f"Total: `{len(videos)}` video | Dipilih: `0`\n\n"
+        f"❎ Semua pilihan telah dibatalkan.",
+        reply_markup=get_playlist_video_selection_keyboard(videos, [], page),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_playlist_confirm_selection(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle confirming video selection."""
+    user_data = context.user_data or {}
+    
+    selected_videos = user_data.get("selected_videos", [])
+    pending_info = user_data.get("pending_info")
+    
+    if not selected_videos:
+        await query.edit_message_text(
+            "❌ *Tidak ada video yang dipilih*\n\n"
+            "Pilih minimal 1 video untuk melanjutkan.",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    playlist_title = pending_info.get("title", "Playlist") if pending_info else "Playlist"
+    
+    # Update required tokens based on selection
+    context.user_data["required_tokens"] = len(selected_videos)
+    
+    await query.edit_message_text(
+        f"✅ *{len(selected_videos)} Video Dipilih*\n\n"
+        f"📋 Playlist: {playlist_title[:40]}\n"
+        f"💰 Token yang diperlukan: `{len(selected_videos)}`\n\n"
+        f"Pilih format download:",
+        reply_markup=get_playlist_format_after_selection_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_selected_format(query, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+    """Handle format selection after video selection."""
+    format_key = data.replace("selected_format_", "")
+    
+    if context.user_data is None:
+        context.user_data = {}
+    
+    context.user_data["format"] = format_key
+    
+    # Get format label
+    format_info = FORMAT_OPTIONS.get(format_key, {})
+    format_label = format_info.get("label", format_key.upper())
+    
+    await query.edit_message_text(
+        f"✅ *Format Dipilih:* {format_label}\n\n"
+        f"📤 *Pilih metode pengiriman:*\n\n"
+        f"• *Telegram* - File dikirim langsung ke chat\n"
+        f"  ⚠️ Maksimal 500MB per file\n\n"
+        f"• *Google Drive* - Unlimited ukuran\n"
+        f"  📎 File disimpan dalam folder playlist",
+        reply_markup=get_delivery_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_back_to_selection(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle going back to video selection."""
+    user_data = context.user_data or {}
+    
+    pending_info = user_data.get("pending_info")
+    if not pending_info:
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*",
+            parse_mode="Markdown",
+            reply_markup=get_back_keyboard(),
+        )
+        return
+    
+    videos = pending_info.get("videos", [])
+    selected_videos = user_data.get("selected_videos", [])
+    page = user_data.get("selection_page", 0)
+    playlist_title = pending_info.get("title", "Playlist")
+    
+    await query.edit_message_text(
+        f"📋 *Pilih Video dari Playlist*\n\n"
+        f"📌 *{playlist_title[:50]}*\n\n"
+        f"Total: `{len(videos)}` video | Dipilih: `{len(selected_videos)}`\n\n"
+        f"Ketuk video untuk memilih/membatalkan:",
+        reply_markup=get_playlist_video_selection_keyboard(videos, selected_videos, page),
+        parse_mode="Markdown",
+    )

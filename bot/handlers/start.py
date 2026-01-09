@@ -168,7 +168,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• Best - Kualitas terbaik tersedia\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "📤 *Metode Pengiriman:*\n"
-        "• Telegram - File dikirim langsung (max 50MB)\n"
+        "• Telegram - File dikirim langsung (max 500MB)\n"
         "• Google Drive - Unlimited, dapat link\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "💰 *Sistem Token:*\n"

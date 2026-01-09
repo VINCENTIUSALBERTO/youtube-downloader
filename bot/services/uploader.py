@@ -61,14 +61,14 @@ class UploaderService:
         """
         try:
             file_size = file_path.stat().st_size
-            max_size = 50 * 1024 * 1024  # 50MB Telegram limit
+            max_size = 500 * 1024 * 1024  # 500MB Telegram Bot API limit for bots
             
             if file_size > max_size:
                 return UploadResult(
                     success=False,
                     delivery_method="telegram",
                     error=f"File terlalu besar untuk Telegram ({file_size / (1024*1024):.1f}MB). "
-                          f"Maksimal 50MB. Silakan pilih Google Drive.",
+                          f"Maksimal 500MB. Silakan pilih Google Drive.",
                 )
             
             with open(file_path, "rb") as f:

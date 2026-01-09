@@ -204,7 +204,7 @@ async def get_playlist_info(url: str, cookies_file: Optional[str] = None) -> Opt
         return {
             "title": playlist_title,
             "count": len(videos),
-            "videos": videos[:50],  # Limit to first 50 for display
+            "videos": videos,  # All videos for download
             "url": url,
         }
         
