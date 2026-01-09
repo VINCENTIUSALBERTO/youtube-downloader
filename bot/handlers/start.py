@@ -26,19 +26,31 @@ async def check_channel_membership(
     bot,
     user_id: int,
     channel: str,
-) -> bool:
-    """Check if user is a member of the required channel."""
+) -> tuple:
+    """
+    Check if user is a member of the required channel.
+    
+    Returns:
+        Tuple of (is_member: bool, error_message: str or None)
+    """
     try:
         member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
-        return member.status in [
+        is_member = member.status in [
             ChatMember.MEMBER,
             ChatMember.ADMINISTRATOR,
             ChatMember.OWNER,
         ]
+        return is_member, None
     except TelegramError as e:
+        error_msg = str(e)
         logger.error(f"Error checking channel membership: {e}")
-        # Return False on error - user needs to retry or admin needs to check bot permissions
-        return False
+        # Provide specific error messages
+        if "chat not found" in error_msg.lower():
+            return False, "Channel tidak ditemukan. Hubungi admin."
+        elif "bot is not a member" in error_msg.lower() or "bot was kicked" in error_msg.lower():
+            return False, "Bot tidak memiliki akses ke channel. Hubungi admin."
+        else:
+            return False, f"Error: {error_msg[:100]}"
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -70,18 +82,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Check if user is registered (skip for admins)
     if not is_admin and not db.is_user_registered(user.id):
         # Check if user has joined the required channel
-        is_member = await check_channel_membership(
+        is_member, error_msg = await check_channel_membership(
             context.bot,
             user.id,
             config.required_channel,
         )
         
         if not is_member:
+            error_text = ""
+            if error_msg:
+                error_text = f"\n\n⚠️ {error_msg}"
+            
             await update.message.reply_text(
                 f"👋 *Selamat datang, {user.first_name}!*\n\n"
                 f"Untuk menggunakan bot ini, Anda harus bergabung terlebih dahulu ke channel:\n\n"
                 f"📢 *{config.required_channel}*\n\n"
-                f"Setelah bergabung, tekan tombol *Verifikasi* di bawah.",
+                f"Setelah bergabung, tekan tombol *Verifikasi* di bawah.{error_text}",
                 reply_markup=get_registration_keyboard(),
                 parse_mode="Markdown",
             )

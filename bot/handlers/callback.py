@@ -846,6 +846,7 @@ async def handle_cancel_download(query, context: ContextTypes.DEFAULT_TYPE) -> N
 async def handle_verify_registration(query, context: ContextTypes.DEFAULT_TYPE, db: Database) -> None:
     """Handle registration verification."""
     user = query.from_user
+    error_msg = None
     
     try:
         member = await context.bot.get_chat_member(
@@ -858,14 +859,31 @@ async def handle_verify_registration(query, context: ContextTypes.DEFAULT_TYPE, 
             ChatMember.OWNER,
         ]
     except TelegramError as e:
+        error_str = str(e)
         logger.error(f"Error checking channel membership: {e}")
-        is_member = False  # Deny if we can't check - user needs to retry
+        is_member = False
+        # Provide specific error messages
+        if "chat not found" in error_str.lower():
+            error_msg = "Channel tidak ditemukan. Hubungi admin."
+        elif "bot is not a member" in error_str.lower() or "bot was kicked" in error_str.lower():
+            error_msg = "Bot tidak memiliki akses ke channel. Hubungi admin."
+        else:
+            error_msg = f"Terjadi kesalahan saat verifikasi. Coba lagi."
     
     if not is_member:
+        error_text = ""
+        if error_msg:
+            error_text = f"\n\n⚠️ {error_msg}"
+        else:
+            error_text = ""
+        
         await query.edit_message_text(
             f"❌ *Verifikasi Gagal*\n\n"
             f"Anda belum bergabung ke channel {config.required_channel}.\n\n"
-            f"Silakan bergabung terlebih dahulu, lalu tekan tombol Verifikasi.",
+            f"📝 *Langkah-langkah:*\n"
+            f"1. Klik tombol \"Join\" di bawah\n"
+            f"2. Bergabung ke channel\n"
+            f"3. Kembali ke sini dan klik \"Verifikasi\"{error_text}",
             reply_markup=get_registration_keyboard(),
             parse_mode="Markdown",
         )
@@ -880,12 +898,12 @@ async def handle_verify_registration(query, context: ContextTypes.DEFAULT_TYPE, 
     
     await query.edit_message_text(
         f"🎉 *Registrasi Berhasil!*\n\n"
-        f"Terima kasih telah bergabung ke {config.required_channel}!\n\n"
+        f"✅ Terima kasih telah bergabung ke {config.required_channel}!\n\n"
         f"🎁 Anda mendapatkan *{config.daily_bonus_amount} Token GRATIS* sebagai bonus selamat datang!\n"
         f"💰 Saldo Anda: `{new_balance}` token\n\n"
-        f"Gunakan /start untuk memulai download.",
+        f"Ketuk tombol di bawah atau gunakan /start untuk memulai download.",
         parse_mode="Markdown",
-        reply_markup=get_back_keyboard(),
+        reply_markup=get_main_menu_keyboard(),
     )
 
 
@@ -1097,13 +1115,27 @@ async def handle_approve_topup(query, context: ContextTypes.DEFAULT_TYPE, data: 
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
     
-    await query.edit_message_text(
-        f"✅ *Topup Disetujui*\n\n"
-        f"User ID: `{request['user_id']}`\n"
-        f"Amount: {request['amount']} Token\n"
-        f"Request ID: #{request_id}",
-        parse_mode="Markdown",
-    )
+    # Update admin message - try caption first (for photo messages), then text
+    try:
+        await query.edit_message_caption(
+            caption=f"✅ *Topup Disetujui*\n\n"
+                    f"📋 *Detail:*\n"
+                    f"├ User ID: `{request['user_id']}`\n"
+                    f"├ Paket: {request['amount']} Token\n"
+                    f"└ Request ID: `#{request_id}`\n\n"
+                    f"✅ Diproses oleh admin.",
+            parse_mode="Markdown",
+            reply_markup=None,  # Remove buttons
+        )
+    except Exception:
+        # Fallback for non-photo messages
+        await query.edit_message_text(
+            f"✅ *Topup Disetujui*\n\n"
+            f"User ID: `{request['user_id']}`\n"
+            f"Amount: {request['amount']} Token\n"
+            f"Request ID: #{request_id}",
+            parse_mode="Markdown",
+        )
 
 
 async def handle_reject_topup(query, context: ContextTypes.DEFAULT_TYPE, data: str, db: Database, admin_id: int) -> None:
@@ -1146,13 +1178,27 @@ async def handle_reject_topup(query, context: ContextTypes.DEFAULT_TYPE, data: s
     except Exception as e:
         logger.error(f"Failed to notify user: {e}")
     
-    await query.edit_message_text(
-        f"❌ *Topup Ditolak*\n\n"
-        f"User ID: `{request['user_id']}`\n"
-        f"Amount: {request['amount']} Token\n"
-        f"Request ID: #{request_id}",
-        parse_mode="Markdown",
-    )
+    # Update admin message - try caption first (for photo messages), then text
+    try:
+        await query.edit_message_caption(
+            caption=f"❌ *Topup Ditolak*\n\n"
+                    f"📋 *Detail:*\n"
+                    f"├ User ID: `{request['user_id']}`\n"
+                    f"├ Paket: {request['amount']} Token\n"
+                    f"└ Request ID: `#{request_id}`\n\n"
+                    f"❌ Ditolak oleh admin.",
+            parse_mode="Markdown",
+            reply_markup=None,  # Remove buttons
+        )
+    except Exception:
+        # Fallback for non-photo messages
+        await query.edit_message_text(
+            f"❌ *Topup Ditolak*\n\n"
+            f"User ID: `{request['user_id']}`\n"
+            f"Amount: {request['amount']} Token\n"
+            f"Request ID: #{request_id}",
+            parse_mode="Markdown",
+        )
 
 
 async def handle_admin_callback(
