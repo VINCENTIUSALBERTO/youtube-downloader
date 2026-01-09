@@ -46,6 +46,14 @@ class Config:
     database_path: str
 
 
+def _safe_int(value: str, default: int) -> int:
+    """Safely convert string to int with fallback to default."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def load_config() -> Config:
     """Load configuration from environment variables."""
     bot_token = os.getenv("BOT_TOKEN", "")
@@ -67,10 +75,10 @@ def load_config() -> Config:
         cookies_file=os.getenv("COOKIES_FILE", ""),
         admin_contact=os.getenv("ADMIN_CONTACT", "@admin"),
         admin_whatsapp=os.getenv("ADMIN_WHATSAPP", ""),
-        token_price_1=int(os.getenv("TOKEN_PRICE_1", "5000")),
-        token_price_5=int(os.getenv("TOKEN_PRICE_5", "20000")),
-        token_price_10=int(os.getenv("TOKEN_PRICE_10", "35000")),
-        token_price_25=int(os.getenv("TOKEN_PRICE_25", "75000")),
+        token_price_1=_safe_int(os.getenv("TOKEN_PRICE_1", "5000"), 5000),
+        token_price_5=_safe_int(os.getenv("TOKEN_PRICE_5", "20000"), 20000),
+        token_price_10=_safe_int(os.getenv("TOKEN_PRICE_10", "35000"), 35000),
+        token_price_25=_safe_int(os.getenv("TOKEN_PRICE_25", "75000"), 75000),
         database_path=os.getenv("DATABASE_PATH", "data/bot.db"),
     )
 

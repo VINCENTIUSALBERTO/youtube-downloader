@@ -5,6 +5,7 @@ Provides utility functions for formatting and string manipulation.
 """
 
 import re
+from datetime import datetime
 from typing import Optional
 
 
@@ -130,7 +131,7 @@ def format_download_result(
     
     result += (
         f"\n━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ Selesai pada: `{__import__('datetime').datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`\n"
+        f"⏰ Selesai pada: `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`\n"
         f"\nTerima kasih telah menggunakan layanan kami! 🙏"
     )
     

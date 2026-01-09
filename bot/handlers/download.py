@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 from bot.database import Database
 from bot.services.token_manager import TokenManager
 from bot.utils.validators import validate_youtube_url, get_video_info, get_playlist_info
-from bot.utils.keyboards import get_back_keyboard
+from bot.utils.keyboards import get_back_keyboard, get_format_keyboard
 from bot.utils.helpers import format_number, format_duration
 from bot.config import config
 
@@ -145,7 +145,6 @@ async def handle_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"Pilih kualitas untuk melanjutkan:"
             )
             
-            from bot.utils.keyboards import get_format_keyboard
             await loading_msg.edit_text(
                 preview_text,
                 reply_markup=get_format_keyboard("playlist"),
@@ -194,7 +193,6 @@ async def handle_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"Pilih kualitas untuk melanjutkan:"
             )
             
-            from bot.utils.keyboards import get_format_keyboard
             format_type = "music" if current_mode == "music" else "video"
             await loading_msg.edit_text(
                 preview_text,
