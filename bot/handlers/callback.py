@@ -6,9 +6,10 @@ Handles all inline keyboard button callbacks.
 
 import asyncio
 import logging
-from datetime import datetime
-from telegram import Update
+from datetime import datetime, date
+from telegram import Update, ChatMember
 from telegram.ext import ContextTypes
+from telegram.error import TelegramError
 
 from bot.database import Database
 from bot.services.downloader import DownloaderService, FORMAT_OPTIONS
@@ -22,6 +23,10 @@ from bot.utils.keyboards import (
     get_token_packages_keyboard,
     get_back_keyboard,
     get_cancel_keyboard,
+    get_topup_keyboard,
+    get_topup_confirm_keyboard,
+    get_admin_topup_action_keyboard,
+    get_registration_keyboard,
 )
 from bot.utils.helpers import format_download_result, format_file_size
 from bot.config import config
@@ -58,10 +63,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await handle_back_to_format(query, context)
     
     elif data.startswith("menu_"):
-        await handle_menu_selection(query, context, data)
+        await handle_menu_selection(query, context, data, db)
     
     elif data.startswith("format_"):
         await handle_format_selection(query, context, data)
+    
+    elif data.startswith("auto_format_"):
+        await handle_auto_format_selection(query, context, data)
     
     elif data.startswith("deliver_"):
         await handle_delivery_selection(query, context, data, db)
@@ -83,6 +91,30 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif data == "cancel_download":
         await handle_cancel_download(query, context)
+    
+    # Registration callbacks
+    elif data == "verify_registration":
+        await handle_verify_registration(query, context, db)
+    
+    # Daily bonus
+    elif data == "claim_bonus":
+        await handle_claim_bonus(query, db, user.id)
+    
+    # Topup callbacks
+    elif data == "topup_menu":
+        await handle_topup_menu(query)
+    
+    elif data.startswith("topup_"):
+        await handle_topup_selection(query, context, data, db)
+    
+    elif data.startswith("send_proof_"):
+        await handle_send_proof(query, context, data, db)
+    
+    elif data.startswith("approve_topup_"):
+        await handle_approve_topup(query, context, data, db, user.id)
+    
+    elif data.startswith("reject_topup_"):
+        await handle_reject_topup(query, context, data, db, user.id)
     
     # Admin callbacks
     elif data.startswith("admin_"):
@@ -123,9 +155,20 @@ async def handle_back_to_format(query, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def handle_menu_selection(query, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+async def handle_menu_selection(query, context: ContextTypes.DEFAULT_TYPE, data: str, db: Database) -> None:
     """Handle main menu selection."""
     mode = data.replace("menu_", "")
+    user = query.from_user
+    
+    # Check registration
+    token_manager = TokenManager(db)
+    if not token_manager.is_admin(user.id) and not db.is_user_registered(user.id):
+        await query.edit_message_text(
+            "❌ Anda belum terdaftar. Gunakan /start untuk mendaftar.",
+            reply_markup=get_back_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
     
     if context.user_data is None:
         context.user_data = {}
@@ -166,6 +209,37 @@ async def handle_format_selection(query, context: ContextTypes.DEFAULT_TYPE, dat
     
     await query.edit_message_text(
         f"✅ *Kualitas Dipilih:* {format_label}\n\n"
+        f"📤 *Pilih metode pengiriman:*\n\n"
+        f"• *Telegram* - File dikirim langsung ke chat\n"
+        f"  ⚠️ Maksimal 50MB\n\n"
+        f"• *Google Drive* - Unlimited ukuran\n"
+        f"  📎 Anda akan mendapat link download",
+        reply_markup=get_delivery_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_auto_format_selection(query, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+    """Handle auto-detected format selection."""
+    format_key = data.replace("auto_format_", "")
+    
+    if context.user_data is None:
+        context.user_data = {}
+    
+    context.user_data["format"] = format_key
+    
+    # Set mode based on format
+    if format_key == "mp3":
+        context.user_data["mode"] = "music"
+    else:
+        context.user_data["mode"] = "video"
+    
+    # Get format label
+    format_info = FORMAT_OPTIONS.get(format_key, {})
+    format_label = format_info.get("label", format_key.upper())
+    
+    await query.edit_message_text(
+        f"✅ *Format Dipilih:* {format_label}\n\n"
         f"📤 *Pilih metode pengiriman:*\n\n"
         f"• *Telegram* - File dikirim langsung ke chat\n"
         f"  ⚠️ Maksimal 50MB\n\n"
@@ -529,6 +603,318 @@ async def handle_cancel_download(query, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def handle_verify_registration(query, context: ContextTypes.DEFAULT_TYPE, db: Database) -> None:
+    """Handle registration verification."""
+    user = query.from_user
+    
+    try:
+        member = await context.bot.get_chat_member(
+            chat_id=config.required_channel,
+            user_id=user.id,
+        )
+        is_member = member.status in [
+            ChatMember.MEMBER,
+            ChatMember.ADMINISTRATOR,
+            ChatMember.OWNER,
+        ]
+    except TelegramError as e:
+        logger.error(f"Error checking channel membership: {e}")
+        is_member = True  # Allow if we can't check
+    
+    if not is_member:
+        await query.edit_message_text(
+            f"❌ *Verifikasi Gagal*\n\n"
+            f"Anda belum bergabung ke channel {config.required_channel}.\n\n"
+            f"Silakan bergabung terlebih dahulu, lalu tekan tombol Verifikasi.",
+            reply_markup=get_registration_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+    
+    # Register user
+    db.register_user(user.id)
+    
+    # Give welcome bonus
+    today_str = date.today().isoformat()
+    new_balance = db.claim_daily_bonus(user.id, config.daily_bonus_amount, today_str)
+    
+    await query.edit_message_text(
+        f"🎉 *Registrasi Berhasil!*\n\n"
+        f"Terima kasih telah bergabung ke {config.required_channel}!\n\n"
+        f"🎁 Anda mendapatkan *{config.daily_bonus_amount} Token GRATIS* sebagai bonus selamat datang!\n"
+        f"💰 Saldo Anda: `{new_balance}` token\n\n"
+        f"Gunakan /start untuk memulai download.",
+        parse_mode="Markdown",
+        reply_markup=get_back_keyboard(),
+    )
+
+
+async def handle_claim_bonus(query, db: Database, user_id: int) -> None:
+    """Handle daily bonus claim."""
+    # Check registration
+    if not db.is_user_registered(user_id):
+        await query.edit_message_text(
+            "❌ Anda belum terdaftar. Gunakan /start untuk mendaftar.",
+            reply_markup=get_back_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+    
+    # Check if already claimed today
+    today_str = date.today().isoformat()
+    last_bonus = db.get_last_daily_bonus(user_id)
+    
+    if last_bonus == today_str:
+        await query.edit_message_text(
+            "⏰ *Bonus Harian*\n\n"
+            "Anda sudah mengklaim bonus hari ini.\n"
+            "Silakan kembali besok! 🌅",
+            reply_markup=get_back_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+    
+    # Claim bonus
+    new_balance = db.claim_daily_bonus(user_id, config.daily_bonus_amount, today_str)
+    
+    await query.edit_message_text(
+        f"🎁 *Bonus Harian Diklaim!*\n\n"
+        f"➕ Anda mendapat *+{config.daily_bonus_amount} Token*\n"
+        f"💰 Saldo Anda sekarang: `{new_balance}` token\n\n"
+        f"Kembali lagi besok untuk bonus berikutnya! 🌅",
+        reply_markup=get_back_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_topup_menu(query) -> None:
+    """Handle topup menu display."""
+    text = (
+        "💳 *Menu Topup Token*\n\n"
+        "Pilih paket token yang ingin Anda beli:\n\n"
+        f"📦 *Paket Tersedia:*\n"
+        f"• 1 Token - Rp {config.token_price_1:,}\n".replace(",", ".") +
+        f"• 5 Token - Rp {config.token_price_5:,}\n".replace(",", ".") +
+        f"• 10 Token - Rp {config.token_price_10:,}\n".replace(",", ".") +
+        f"• 25 Token - Rp {config.token_price_25:,}\n\n".replace(",", ".") +
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💡 *Cara Topup:*\n"
+        f"1. Pilih paket di bawah\n"
+        f"2. Transfer ke rekening yang tertera\n"
+        f"3. Kirim bukti transfer\n"
+        f"4. Admin akan memverifikasi\n"
+        f"5. Token otomatis ditambahkan ✅"
+    )
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=get_topup_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_topup_selection(query, context: ContextTypes.DEFAULT_TYPE, data: str, db: Database) -> None:
+    """Handle topup package selection."""
+    package = data.replace("topup_", "")
+    
+    prices = {
+        "1": config.token_price_1,
+        "5": config.token_price_5,
+        "10": config.token_price_10,
+        "25": config.token_price_25,
+    }
+    
+    amounts = {
+        "1": 1,
+        "5": 5,
+        "10": 10,
+        "25": 25,
+    }
+    
+    price = prices.get(package, 0)
+    amount = amounts.get(package, 0)
+    
+    # Store topup info in context
+    if context.user_data is None:
+        context.user_data = {}
+    
+    context.user_data["topup_package"] = package
+    context.user_data["topup_amount"] = amount
+    context.user_data["topup_price"] = price
+    
+    text = (
+        f"💳 *Topup Token*\n\n"
+        f"📦 *Paket:* {amount} Token\n"
+        f"💰 *Harga:* Rp {price:,}\n\n".replace(",", ".") +
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🏦 *Transfer ke:*\n"
+        f"Bank: `{config.payment_bank}`\n"
+        f"No. Rekening: `{config.payment_account}`\n"
+        f"Atas Nama: `{config.payment_name}`\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📋 *Langkah-langkah:*\n"
+        f"1. Transfer *Rp {price:,}* ke rekening di atas\n".replace(",", ".") +
+        f"2. Screenshot bukti transfer\n"
+        f"3. Tekan tombol *Kirim Bukti Transfer*\n"
+        f"4. Kirim screenshot bukti transfer Anda\n"
+        f"5. Tunggu verifikasi admin (maks 1x24 jam)\n\n"
+        f"⚠️ *Penting:* Pastikan nominal transfer sesuai!"
+    )
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=get_topup_confirm_keyboard(package),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_send_proof(query, context: ContextTypes.DEFAULT_TYPE, data: str, db: Database) -> None:
+    """Handle send proof button - user needs to send a photo."""
+    package = data.replace("send_proof_", "")
+    user = query.from_user
+    
+    user_data = context.user_data or {}
+    amount = user_data.get("topup_amount", 0)
+    price = user_data.get("topup_price", 0)
+    
+    if not amount or not price:
+        await query.edit_message_text(
+            "❌ *Sesi Kadaluarsa*\n\n"
+            "Silakan pilih paket topup lagi.",
+            reply_markup=get_topup_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+    
+    # Create topup request
+    request_id = db.create_topup_request(
+        user_id=user.id,
+        amount=amount,
+        package=package,
+        price=price,
+    )
+    
+    # Store request ID in context for later
+    context.user_data["topup_request_id"] = request_id
+    context.user_data["awaiting_proof"] = True
+    
+    await query.edit_message_text(
+        f"📤 *Kirim Bukti Transfer*\n\n"
+        f"Silakan kirim *screenshot/foto* bukti transfer Anda sebagai pesan berikutnya.\n\n"
+        f"📋 *Detail Topup:*\n"
+        f"• Paket: {amount} Token\n"
+        f"• Harga: Rp {price:,}\n".replace(",", ".") +
+        f"• ID Request: `#{request_id}`\n\n"
+        f"⏳ Menunggu bukti transfer...",
+        parse_mode="Markdown",
+    )
+
+
+async def handle_approve_topup(query, context: ContextTypes.DEFAULT_TYPE, data: str, db: Database, admin_id: int) -> None:
+    """Handle admin approving a topup request."""
+    token_manager = TokenManager(db)
+    
+    if not token_manager.is_admin(admin_id):
+        return
+    
+    request_id = int(data.replace("approve_topup_", ""))
+    request = db.get_topup_request(request_id)
+    
+    if not request:
+        await query.edit_message_text("❌ Request tidak ditemukan.")
+        return
+    
+    if request["status"] != "pending":
+        await query.edit_message_text("❌ Request sudah diproses.")
+        return
+    
+    # Add tokens to user
+    token_manager.add_tokens(
+        user_id=request["user_id"],
+        amount=request["amount"],
+        admin_id=admin_id,
+        description=f"Topup {request['amount']} token (#{request_id})",
+    )
+    
+    # Update request status
+    db.update_topup_request(
+        request_id=request_id,
+        status="approved",
+        processed_by=admin_id,
+    )
+    
+    # Notify user
+    try:
+        await context.bot.send_message(
+            chat_id=request["user_id"],
+            text=f"✅ *Topup Berhasil!*\n\n"
+                 f"Topup Anda telah diverifikasi.\n\n"
+                 f"📦 Paket: {request['amount']} Token\n"
+                 f"💰 ID Request: `#{request_id}`\n\n"
+                 f"Token sudah ditambahkan ke saldo Anda!",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user: {e}")
+    
+    await query.edit_message_text(
+        f"✅ *Topup Disetujui*\n\n"
+        f"User ID: `{request['user_id']}`\n"
+        f"Amount: {request['amount']} Token\n"
+        f"Request ID: #{request_id}",
+        parse_mode="Markdown",
+    )
+
+
+async def handle_reject_topup(query, context: ContextTypes.DEFAULT_TYPE, data: str, db: Database, admin_id: int) -> None:
+    """Handle admin rejecting a topup request."""
+    token_manager = TokenManager(db)
+    
+    if not token_manager.is_admin(admin_id):
+        return
+    
+    request_id = int(data.replace("reject_topup_", ""))
+    request = db.get_topup_request(request_id)
+    
+    if not request:
+        await query.edit_message_text("❌ Request tidak ditemukan.")
+        return
+    
+    if request["status"] != "pending":
+        await query.edit_message_text("❌ Request sudah diproses.")
+        return
+    
+    # Update request status
+    db.update_topup_request(
+        request_id=request_id,
+        status="rejected",
+        processed_by=admin_id,
+    )
+    
+    # Notify user
+    try:
+        await context.bot.send_message(
+            chat_id=request["user_id"],
+            text=f"❌ *Topup Ditolak*\n\n"
+                 f"Maaf, topup Anda tidak dapat diverifikasi.\n\n"
+                 f"📦 Paket: {request['amount']} Token\n"
+                 f"💰 ID Request: `#{request_id}`\n\n"
+                 f"Alasan: Bukti transfer tidak valid.\n"
+                 f"Hubungi {config.admin_contact} jika ada kesalahan.",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user: {e}")
+    
+    await query.edit_message_text(
+        f"❌ *Topup Ditolak*\n\n"
+        f"User ID: `{request['user_id']}`\n"
+        f"Amount: {request['amount']} Token\n"
+        f"Request ID: #{request_id}",
+        parse_mode="Markdown",
+    )
+
+
 async def handle_admin_callback(
     query,
     context: ContextTypes.DEFAULT_TYPE,
@@ -613,6 +999,29 @@ async def handle_admin_callback(
             "Contoh:\n"
             "`/broadcast Halo semua! Ada promo hari ini.`"
         )
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown",
+        )
+    
+    elif action == "pending_topup":
+        pending = db.get_pending_topup_requests()
+        
+        if not pending:
+            text = "💳 *Topup Pending*\n\nTidak ada request topup yang pending."
+        else:
+            text = f"💳 *Topup Pending* ({len(pending)})\n\n"
+            for req in pending[:10]:
+                user = db.get_user(req["user_id"])
+                username = user.get("username") if user else "Unknown"
+                text += (
+                    f"• ID: `#{req['id']}`\n"
+                    f"  User: `{req['user_id']}` (@{username})\n"
+                    f"  Paket: {req['amount']} Token\n"
+                    f"  Harga: Rp {req['price']:,}\n\n".replace(",", ".")
+                )
         
         await query.edit_message_text(
             text,

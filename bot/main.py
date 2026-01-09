@@ -21,6 +21,8 @@ from bot.handlers.start import (
     token_command,
     history_command,
     buy_command,
+    topup_command,
+    bonus_command,
 )
 from bot.handlers.admin import (
     admin_command,
@@ -31,7 +33,7 @@ from bot.handlers.admin import (
     unban_command,
     users_command,
 )
-from bot.handlers.download import handle_url_message
+from bot.handlers.download import handle_url_message, handle_photo_message
 from bot.handlers.callback import handle_callback_query
 
 # Configure logging
@@ -62,6 +64,8 @@ def create_application() -> Application:
     application.add_handler(CommandHandler("token", token_command))
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CommandHandler("buy", buy_command))
+    application.add_handler(CommandHandler("topup", topup_command))
+    application.add_handler(CommandHandler("bonus", bonus_command))
     
     # Admin commands
     application.add_handler(CommandHandler("admin", admin_command))
@@ -75,6 +79,11 @@ def create_application() -> Application:
     # Message handler for URLs
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_message)
+    )
+    
+    # Message handler for photos (topup proof)
+    application.add_handler(
+        MessageHandler(filters.PHOTO, handle_photo_message)
     )
     
     # Callback query handler for inline keyboards
