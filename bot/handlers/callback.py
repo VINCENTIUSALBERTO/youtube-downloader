@@ -619,7 +619,7 @@ async def handle_verify_registration(query, context: ContextTypes.DEFAULT_TYPE, 
         ]
     except TelegramError as e:
         logger.error(f"Error checking channel membership: {e}")
-        is_member = True  # Allow if we can't check
+        is_member = False  # Deny if we can't check - user needs to retry
     
     if not is_member:
         await query.edit_message_text(

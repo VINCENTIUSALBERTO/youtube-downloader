@@ -15,6 +15,7 @@ from bot.utils.keyboards import (
     get_back_keyboard,
     get_format_keyboard,
     get_auto_detect_format_keyboard,
+    get_admin_topup_action_keyboard,
 )
 from bot.utils.helpers import format_number, format_duration
 from bot.config import config
@@ -368,8 +369,6 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data["awaiting_proof"] = False
     
     # Forward proof to all admins
-    from bot.utils.keyboards import get_admin_topup_action_keyboard
-    
     for admin_id in config.admin_user_ids:
         try:
             # Forward the photo to admin

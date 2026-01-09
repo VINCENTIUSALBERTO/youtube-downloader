@@ -37,8 +37,8 @@ async def check_channel_membership(
         ]
     except TelegramError as e:
         logger.error(f"Error checking channel membership: {e}")
-        # If we can't check, allow access (might be a private channel or bot not admin)
-        return True
+        # Return False on error - user needs to retry or admin needs to check bot permissions
+        return False
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
