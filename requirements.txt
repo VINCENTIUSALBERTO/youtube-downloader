@@ -1,0 +1,9 @@
+# YouTube Downloader Telegram Bot Dependencies
+# Core dependencies
+python-telegram-bot>=21.0
+yt-dlp>=2024.1.0
+python-dotenv>=1.0.0
+
+# Note: The following system dependencies are also required:
+# - ffmpeg (for audio extraction)
+# - rclone (for Google Drive upload)
