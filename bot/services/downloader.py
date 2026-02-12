@@ -105,7 +105,9 @@ class DownloaderService:
             "--progress",
             "--newline",
             "--no-check-certificate",
-            "--extractor-args", "youtube:player_client=web,default",
+            "--extractor-args", "youtube:player_client=default,mweb",
+            "--retries", "3",
+            "--extractor-retries", "3",
         ]
         
         # Add cookies if available
@@ -215,7 +217,9 @@ class DownloaderService:
             "--flat-playlist",
             "--print", "%(id)s",
             "--no-check-certificate",
-            "--extractor-args", "youtube:player_client=web,default",
+            "--extractor-args", "youtube:player_client=default,mweb",
+            "--retries", "3",
+            "--extractor-retries", "3",
             url,
         ]
         
@@ -288,6 +292,8 @@ class DownloaderService:
             return "Video diblokir karena hak cipta."
         elif "Sign in" in error_msg:
             return "Video memerlukan login. Silakan konfigurasi cookies."
+        elif "HTTP Error 403" in error_msg or "403: Forbidden" in error_msg:
+            return "Gagal mengunduh video (HTTP 403). Silakan coba lagi atau konfigurasi cookies."
         else:
             return f"Terjadi kesalahan: {error_msg[:200]}"
     

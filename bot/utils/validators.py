@@ -80,7 +80,7 @@ async def get_video_info(url: str, cookies_file: Optional[str] = None) -> Option
         "--no-download",
         "--no-warnings",
         "--no-check-certificate",
-        "--extractor-args", "youtube:player_client=web,default",
+        "--extractor-args", "youtube:player_client=default,mweb",
     ]
     
     if cookies_file:
@@ -158,7 +158,7 @@ async def get_playlist_info(url: str, cookies_file: Optional[str] = None) -> Opt
         "--no-download",
         "--no-warnings",
         "--no-check-certificate",
-        "--extractor-args", "youtube:player_client=web,default",
+        "--extractor-args", "youtube:player_client=default,mweb",
     ]
     
     if cookies_file:
